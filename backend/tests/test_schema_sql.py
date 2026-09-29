@@ -90,3 +90,54 @@ def test_money_columns_are_indexed_where_they_are_queried(ddl):
     scan on every page of history."""
     for index in ("ix_ledger_entries_user_kind", "ix_ledger_transactions_created_at"):
         assert f"CREATE INDEX {index}" in ddl, f"{index} is missing"
+
+
+def test_the_published_schema_is_valid_postgresql(ddl):
+    """Parse the file with PostgreSQL's own grammar.
+
+    Everything else in this module checks the *content* of the schema: that it
+    matches the models, that it has the right tables, that the money is
+    integral and the keys unique. None of that notices a syntax error. The
+    application never reads this file - `create_all` builds the tables from the
+    models - so a typo here would sail through the whole suite and first
+    surface when an operator ran it against the database that holds the money.
+
+    pglast ships libpg_query, the parser PostgreSQL itself uses, so this is not
+    a close approximation of Postgres syntax: it is the thing that will reject
+    or accept the file on a real server.
+
+    Skips rather than fails when pglast is absent, so a minimal environment is
+    not blocked by a check it cannot run. It is pinned in
+    ``backend/requirements.txt`` (development only - the deployed runtime has
+    no use for a SQL parser), so `make install` enables it.
+    """
+    pglast = pytest.importorskip(
+        "pglast", reason="pip install pglast to parse the schema as PostgreSQL"
+    )
+
+    try:
+        statements = pglast.parse_sql(ddl)
+    except Exception as exc:  # libpg_query raises on the first syntax error
+        pytest.fail(f"backend/sql/schema.sql is not valid PostgreSQL: {exc}")
+
+    kinds: dict[str, int] = {}
+    for statement in statements:
+        name = type(statement.stmt).__name__
+        kinds[name] = kinds.get(name, 0) + 1
+
+    # Guard against the parser quietly accepting a prefix of the file and
+    # stopping: every table and enum written in the text must have produced a
+    # node. If a statement were swallowed, the file would parse "clean" while
+    # silently omitting tables.
+    assert kinds.get("CreateStmt", 0) == len(re.findall(r"^CREATE TABLE ", ddl, re.M)), (
+        "the parser did not see every CREATE TABLE - the schema may be truncated"
+    )
+    assert kinds.get("CreateEnumStmt", 0) == len(re.findall(r"^CREATE TYPE ", ddl, re.M))
+    # `CREATE UNIQUE INDEX` counts too - four of the indexes in this schema
+    # are unique, and they are the ones that stop a replayed callback from
+    # crediting twice.
+    assert kinds.get("IndexStmt", 0) == len(
+        re.findall(r"^CREATE (?:UNIQUE )?INDEX ", ddl, re.M)
+    )
+
+    assert kinds["CreateStmt"] >= 20, "the schema lost tables"

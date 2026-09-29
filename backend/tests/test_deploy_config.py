@@ -27,9 +27,9 @@ ENTRY = ROOT / next(iter(VERCEL_FUNCTIONS))
 
 #: Fine to differ between the two lists:
 #:   uvicorn - the serverless runtime supplies its own ASGI server
-#:   httpx / pytest - test-only dependencies
+#:   httpx / pytest / pglast - test-only dependencies
 #:   psycopg - deploy-only (Postgres for a persistent deployment)
-DEV_ONLY = {"uvicorn", "httpx", "pytest"}
+DEV_ONLY = {"uvicorn", "httpx", "pytest", "pglast"}
 DEPLOY_ONLY = {"psycopg"}
 
 
