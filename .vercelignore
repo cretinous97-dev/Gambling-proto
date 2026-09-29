@@ -27,3 +27,6 @@ backend/scripts/
 .gitignore
 .DS_Store
 *.log
+
+# Python bytecode created by the local entry-point import
+api/__pycache__/
