@@ -165,12 +165,27 @@ def _settle(
     locked_stake = stake if stake is not None else bet.stake
     payout = max(int(payout), 0)
 
+    # Cap the payout. House edge only protects the operator over many bets; it
+    # does nothing about the tail, where one maximum-stake top-prize hit is a
+    # liability the operator has to fund. The cap is applied here, at the single
+    # point where every game settles, so no game can bypass it.
+    cap = int(settings.max_win_usd * 100)
+    capped = False
+    if cap > 0 and payout > cap:
+        payout = cap
+        capped = True
+
     settle_bet(db, user.id, locked_stake, payout, reference=bet.id)
 
     bet.payout = payout
     bet.profit = payout - locked_stake
     bet.multiplier = multiplier
     bet.result = result
+    if capped:
+        # Recorded on the bet so the player, support and the audit trail all
+        # see that a cap applied rather than silently receiving less.
+        bet.result = {**result, "max_win_capped": True,
+                      "max_win_cap_cents": cap}
     bet.wager_contribution = int(
         locked_stake * bonus_svc.WAGER_WEIGHT.get(bet.game, 0.5)
     )

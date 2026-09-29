@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     # --- ops ----------------------------------------------------------------
     min_bet_usd: float = 0.10
     max_bet_usd: float = 2_000.0
+    # Hard ceiling on what a single bet can return, in USD. This is the stopper
+    # against the worst case in gambling: a player finds an edge (or a bug, or
+    # a stuck seed) and bets the table maximum on it. Without a cap, one
+    # unlucky combination of maximum stake and top prize is unbounded
+    # liability. 0 disables the cap - do not disable it in production.
+    max_win_usd: float = 100_000.0
     rate_limit_bets_per_min: int = 240
     crash_round_gap_s: float = 6.0
     admin_email: str = "admin@casino.example.com"   # CHANGE THIS (must be a valid address)

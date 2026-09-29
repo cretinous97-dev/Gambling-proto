@@ -281,3 +281,28 @@ tr:hover td { background: rgba(124, 92, 255, 0.05); }
   .bet-bar { align-items: stretch; }
   .bet-bar .field { flex: 1 1 130px; }
 }
+
+
+/* --------------------------------------------------------------- artwork */
+.game-art { object-fit: cover; display: block; border: 1px solid var(--line); }
+.game-art-fallback { line-height: 1; display: inline-block; }
+.brand-mark-img { object-fit: contain; display: block; }
+
+.hero {
+  position: relative; border-radius: var(--radius); overflow: hidden;
+  margin-bottom: 22px; min-height: 260px; border: 1px solid var(--line);
+}
+.hero-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.hero-veil {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, rgba(11,15,26,.96) 0%, rgba(11,15,26,.82) 42%, rgba(11,15,26,.28) 100%),
+    linear-gradient(180deg, rgba(11,15,26,.35), rgba(11,15,26,.75));
+}
+.hero-body { position: relative; padding: 30px 32px; max-width: 620px; }
+.hero-body h1 { font-size: 34px; margin: 12px 0 8px; letter-spacing: -0.02em; }
+
+@media (max-width: 640px) {
+  .hero-body { padding: 22px 18px; }
+  .hero-body h1 { font-size: 26px; }
+}

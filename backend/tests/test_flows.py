@@ -530,3 +530,60 @@ def test_websocket_multiplier_feed(client):
         message = ws.receive_json()
         assert message["type"] == "crash.state"
         assert "phase" in message
+
+
+# ---------------------------------------------------------------------------
+# maximum-win cap
+# ---------------------------------------------------------------------------
+def test_a_huge_payout_is_capped_and_recorded(client, monkeypatch):
+    """The cap must hold at the single settlement point every game uses.
+
+    House edge protects the operator over many bets; it does nothing about the
+    tail. Without a cap, one maximum-stake top-prize hit is unbounded liability.
+    """
+    from app.config import settings
+    from app.services import bets as bet_svc
+    from app.db import session_scope
+    from app.models import Bet
+
+    monkeypatch.setattr(settings, "max_win_usd", 50.0, raising=False)
+
+    token = register(client, email="cap@example.com", username="captester")["access_token"]
+    deposit(client, token, "200.00")
+
+    # Mines leaves a bet OPEN across several requests, which is what a
+    # settlement-time cap has to defend. Instant games settle inside the
+    # request that creates them.
+    bet = client.post("/api/games/mines/start", headers=auth_headers(token),
+                      json={"stake": "10.00", "mines": 3}).json()
+
+    with session_scope() as db:
+        row = db.get(Bet, bet["id"])
+        from app.models import User
+        user = db.get(User, row.user_id)
+        bet_svc._settle(db, user, row, payout=500_000, multiplier=999.0, result={})
+
+    # reset for the rest of the suite
+    monkeypatch.setattr(settings, "max_win_usd", 100_000.0, raising=False)
+
+    with session_scope() as db:
+        row = db.get(Bet, bet["id"])
+        assert row.payout == 5_000, f"payout {row.payout} was not capped to 50.00"
+        assert row.result.get("max_win_capped") is True
+        assert row.result.get("max_win_cap_cents") == 5_000
+
+
+def test_the_cap_does_not_affect_normal_wins(client):
+    """A cap that clips ordinary payouts would be a bug, not a safeguard."""
+    from app.config import settings
+
+    assert settings.max_win_usd >= 10_000, "the default cap is too tight to be safe"
+
+    token = register(client, email="nocap@example.com", username="nocaptester")["access_token"]
+    deposit(client, token, "100.00")
+    res = client.post("/api/games/play", headers=auth_headers(token), json={
+        "game": "coinflip", "stake": "5.00", "params": {"side": "heads"},
+        "idempotency_key": "cap-test-2",
+    }).json()
+    assert res["settled"] is True
+    assert res["result"].get("max_win_capped") is None

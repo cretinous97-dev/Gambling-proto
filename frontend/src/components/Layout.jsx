@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useStore } from '../lib/store.jsx'
 import { ProviderBanner } from './ui.jsx'
+import { BrandMark } from './GameArt.jsx'
 import { fmtCents } from '../lib/format.js'
 
 export default function Layout() {
@@ -22,7 +23,7 @@ export default function Layout() {
 
       <header className="topbar">
         <Link to="/" className="brand">
-          <span className="brand-mark">♠</span>
+          <BrandMark size={32} />
           <span>{config?.name || 'Naktsang Casino'}</span>
         </Link>
 

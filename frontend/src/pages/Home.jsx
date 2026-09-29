@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api.js'
-import { fmtCents, fmtMultiplier, GAME_ICONS, fmtRelative } from '../lib/format.js'
+import { fmtCents, fmtMultiplier, fmtRelative } from '../lib/format.js'
 import { Card, Stat, Loading, Empty } from '../components/ui.jsx'
+import GameArt from '../components/GameArt.jsx'
 import { useStore } from '../lib/store.jsx'
 
 export default function Home() {
@@ -94,19 +95,40 @@ export default function Home() {
         </div>
       </div>
 
+      {/* ------------------------------------------------------------ hero */}
+      <section className="hero">
+        <picture>
+          <source srcSet="/brand/hero.webp" type="image/webp" />
+          <img src="/brand/hero.jpg" alt="" className="hero-bg" />
+        </picture>
+        <div className="hero-veil" />
+        <div className="hero-body">
+          <span className="badge badge-ok">Provably fair</span>
+          <h1>{config?.name || 'Naktsang Casino'}</h1>
+          <p className="muted" style={{ maxWidth: 430 }}>
+            Eleven games, instant settlement and a published return on every one.
+            Every result is generated from a seed you can verify yourself.
+          </p>
+          <div className="row" style={{ gap: 10, marginTop: 14 }}>
+            <Link to="/crash" className="btn btn-primary">Play Crash — live now</Link>
+            {!isAuthed && <Link to="/register" className="btn btn-ghost">Create an account</Link>}
+          </div>
+        </div>
+      </section>
+
       {/* ----------------------------------------------------------- games */}
       <h2 style={{ fontSize: 18 }}>Games</h2>
       <div className="game-grid" style={{ marginBottom: 22 }}>
         <Link to="/crash" className="game-tile" style={{ borderColor: 'var(--accent)' }}>
           <span className="rtp">99% RTP · LIVE</span>
-          <div className="icon">🚀</div>
+          <div className="icon"><GameArt slug="crash" size={46} /></div>
           <div className="name">Crash</div>
           <div className="small muted">Shared live round. Cash out before the curve busts.</div>
         </Link>
         {games.map((g) => (
           <Link key={g.slug} to={`/game/${g.slug}`} className="game-tile">
             <span className="rtp">{(g.rtp * 100).toFixed(1)}% RTP</span>
-            <div className="icon">{GAME_ICONS[g.slug] || '🎮'}</div>
+            <div className="icon"><GameArt slug={g.slug} size={46} /></div>
             <div className="name">{g.name}</div>
             <div className="small muted">{g.blurb}</div>
           </Link>
