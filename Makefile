@@ -9,7 +9,7 @@ PORT ?= 8000
 WEB_PORT ?= 5173
 BASE ?= http://127.0.0.1:$(PORT)
 
-.PHONY: help install api web build test smoke reset fmt clean
+.PHONY: help install api web build test smoke smoke-serverless deploy-check reset fmt clean
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -34,6 +34,14 @@ test: ## run the whole backend test suite
 
 smoke: ## drive the live API end to end (deposit -> play -> withdraw -> payout)
 	cd backend && PYTHONPATH=. ../$(PY) scripts/smoke_e2e.py $(BASE)
+
+smoke-serverless: ## run the app the way Vercel does (no lifespan, no loops, /tmp db)
+	cd backend && PYTHONPATH=. ../$(PY) scripts/smoke_serverless.py
+
+deploy-check: ## verify the Vercel configuration before deploying
+	$(PY) -c "import json;json.load(open('vercel.json'));print('vercel.json is valid JSON')"
+	cd backend && PYTHONPATH=. ../$(PY) -m pytest tests/test_deploy_config.py -q
+	cd backend && PYTHONPATH=. ../$(PY) scripts/smoke_serverless.py
 
 reset: ## delete the local database (DESTROYS local player balances)
 	rm -f backend/data/casino.db*

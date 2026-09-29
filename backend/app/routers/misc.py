@@ -41,6 +41,15 @@ def site_config():
             "first_deposit_wager_x": settings.first_deposit_bonus_wager_x,
         },
         "jurisdiction_blocklist": sorted(settings.blocklist),
+        # Surface the deployment honestly: a public test deployment moves no
+        # real money and may not persist balances between restarts. The UI
+        # shows a banner rather than letting testers think they lost funds.
+        "deployment": {
+            "serverless": settings.serverless,
+            "demo_mode": settings.demo_mode,
+            "balances_persist": not settings.persistence_is_temporary,
+            "real_money": provider_status().get("mode") == "live",
+        },
     }
 
 

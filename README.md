@@ -25,6 +25,7 @@ licence and **your** merchant account. See [Your part to do](#your-part-to-do).
 - [The games](#the-games)
 - [Provably fair](#provably-fair)
 - [Compliance and player protection](#compliance-and-player-protection)
+- [Deploying](#deploying)
 - [Configuration](#configuration)
 - [Testing](#testing)
 - [Project layout](#project-layout)
@@ -51,7 +52,8 @@ Everything below is verified by an automated end-to-end run against the live API
 | Live crash game over WebSockets | working |
 | Bonus engine: first-deposit bonus, promo codes, wagering requirements | working |
 | Rakeback, VIP tiers, jackpot pool, leaderboards | working |
-| ~68 backend tests incl. exact RTP proofs and statistical RTP checks | passing |
+| ~81 backend tests incl. exact RTP proofs, statistical RTP checks and deploy guards | passing |
+| Runs on a serverless platform (no lifespan, no loops, no persistent disk) | working, see [Deploying](#deploying) |
 
 ---
 
@@ -328,6 +330,99 @@ Built in, because retrofitting these is far harder than building them:
 
 ---
 
+## Deploying
+
+### What this app needs that serverless platforms do not have
+
+Being straight about this saves you a bad afternoon. The application was written
+for a normal long-running server, and three of its assumptions clash with
+serverless hosting:
+
+| Assumption | Why serverless breaks it | What this repo does about it |
+|---|---|---|
+| A startup hook creates tables and the operator account | Vercel never calls the ASGI lifespan | the first request bootstraps the app (`bootstrap_app`), idempotently |
+| A background loop runs the crash rounds | there is no process between requests, and ten instances would run ten different rounds | rounds advance from the **clock** on the request that arrives (`crash_loop.advance`), so shared state stays consistent with no loop |
+| `./data/casino.db` is writable and keeps its contents | the bundle is read-only; only `/tmp` is writable and it is wiped | the database moves to `/tmp` automatically, and the API reports `balances_persist: false` so the UI can warn testers |
+
+WebSockets are the one thing that cannot be faked: Vercel functions do not hold
+long-lived connections. The crash game therefore refuses the socket with an
+explanation and the page falls back to REST polling, which drives the exact same
+state machine. Everything else is unaffected.
+
+**This is a testing deployment.** Balances live in `/tmp` and reset when the
+function is recycled. Point `DATABASE_URL` at a Postgres database (Neon and
+Supabase both have free tiers) to make them survive.
+
+### Deploy to Vercel
+
+```bash
+npx vercel login          # once
+npx vercel                # preview deployment
+npx vercel --prod         # production
+```
+
+Run `make deploy-check` first — it validates the config and runs the app the way
+Vercel runs it.
+
+Set these in **Project → Settings → Environment Variables**:
+
+| Variable | Value | Why |
+|---|---|---|
+| `SECRET_KEY` | `python3 -c "import secrets;print(secrets.token_urlsafe(64))"` | without it each cold start mints a new key and every session drops |
+| `DATABASE_URL` | `postgresql+psycopg://…` | optional; without it balances reset |
+| `ADMIN_PASSWORD` | something real | the seeded default is public |
+| `CORS_ORIGINS` | `https://your-app.vercel.app` | replace the `*` default |
+
+Two honest caveats:
+
+- **I could not run `vercel deploy` for you.** This build environment has no
+  access to vercel.com (DNS resolves, connections are refused), so the last step
+  has to run from your machine. Everything up to that point is verified: the
+  app is exercised in a Vercel-shaped harness (`make smoke-serverless`, 30
+  checks) that removes the lifespan, removes the loops and moves the database to
+  `/tmp`.
+- **Vercel's terms are worth checking** before you host anything gambling-related
+  there. This is a sandbox-mode test deployment with no real money; a licensed
+  real-money operation should confirm the platform permits it, and will need a
+  hosting setup with a persistent disk or a managed database regardless.
+
+### If something goes wrong after deploying
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Every `/api/...` returns 404 | the platform rewrote the function's path and dropped the original | the entry point already tries to recover it from proxy headers; if it cannot, tell me and we switch to an explicit rewrite |
+| "Invalid session" after a while | `SECRET_KEY` is not set, so each cold start mints a new one | set `SECRET_KEY` in the project environment |
+| Balances reset between visits | the database is the `/tmp` SQLite file | set `DATABASE_URL` to a Postgres URL |
+| Crash page shows "Betting closed" but never runs | you are reading a cached response | check `GET /api/health` reports `deployment.background_loops` correctly; the browser sets `no-store` on API calls |
+| Deploy fails on the Python function | dependency resolution in the build image | run `make deploy-check` locally first; it installs and runs the same entry point |
+
+### The recommended shape for a real deployment
+
+Vercel is an excellent home for the frontend and a poor one for this backend.
+The split that works:
+
+```
+Vercel          ->  frontend (static build of frontend/dist)
+Railway/Render/Fly/VM ->  backend (uvicorn, background loops, websockets)
+Neon/Postgres   ->  the database (the ledger is the business)
+```
+
+To run the backend that way, deploy the repo with `backend/` as the root
+directory and:
+
+```bash
+pip install -r backend/requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Everything works there exactly as it does locally: real background loops,
+WebSockets, and a database that keeps its contents. Point the frontend at it
+with `VITE_API_BASE` or a rewrite, and set `CORS_ORIGINS` to your frontend
+domain.
+
+
+---
+
 ## Configuration
 
 All settings come from environment variables; see `backend/.env.example` for the
@@ -347,7 +442,7 @@ full annotated list. The safety-relevant defaults:
 ## Testing
 
 ```bash
-make test                                   # 68 tests
+make test                                   # 81 tests
 ```
 
 - `test_ledger.py` — double-entry invariants, zero-sum, insufficient funds
@@ -356,6 +451,8 @@ make test                                   # 68 tests
 - `test_game_math.py` — statistical RTP checks for every game
 - `test_slots_exact.py` — **exact** slot RTP: closed form vs. brute-force
   enumeration of all 10⁵ symbol sequences, plus line-grader regression cases
+- `test_deploy_config.py` — the deploy cannot drift from what was tested
+  (requirements parity, Vercel config, entry point, ignore rules)
 
 ```bash
 make smoke                                  # 50 checks against a running server

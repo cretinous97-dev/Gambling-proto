@@ -9,6 +9,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -23,6 +24,15 @@ class Settings(BaseSettings):
     debug: bool = True
     base_dir: Path = BASE_DIR
 
+    # --- deployment mode ----------------------------------------------------
+    # Serverless platforms (Vercel) set VERCEL=1. There is no persistent disk
+    # and no process that keeps running between requests, which changes two
+    # things: where SQLite is allowed to live, and how shared games advance.
+    serverless: bool = bool(os.getenv("VERCEL") or os.getenv("SERVERLESS"))
+    # Demo mode is for public test deployments: the sandbox provider plus a
+    # database that resets. It is surfaced in /api/config so the UI can say so.
+    demo_mode: bool = False
+
     # --- security -----------------------------------------------------------
     # CHANGE THIS. A weak/leaked signing key = anybody can mint admin tokens.
     secret_key: str = "dev-only-insecure-secret-change-me"
@@ -32,7 +42,11 @@ class Settings(BaseSettings):
     password_min_length: int = 8
 
     # --- database -----------------------------------------------------------
-    database_url: str = f"sqlite:///{BASE_DIR / 'data' / 'casino.db'}"
+    # Empty means "pick something sensible": ./data/casino.db locally, /tmp on
+    # serverless (the only writable path). Set DATABASE_URL to a Postgres URL
+    # for a deployment that must keep player balances across restarts.
+    database_url: str = ""
+    sqlite_fallback_dir: str = "/tmp"
 
     # --- payments -----------------------------------------------------------
     # 'sandbox'  -> self-contained simulator, no real money, safe to demo.
@@ -74,6 +88,37 @@ class Settings(BaseSettings):
     admin_password: str = "Admin!2345"
     cors_origins: str = "*"
 
+    @model_validator(mode="after")
+    def _fill_defaults(self):
+        if self.serverless:
+            # Vercel runs its own production tier; do not make a test deploy
+            # look like a live casino just because VERCEL_ENV says production.
+            if os.getenv("VERCEL_ENV") and "ENVIRONMENT" not in os.environ:
+                self.environment = "staging"
+            self.demo_mode = True
+            if not self.secret_key or self.secret_key.startswith("dev-only"):
+                # Keep the deployment usable, but never silently: sessions will
+                # not survive a cold start, and the operator must set a real key.
+                import secrets as _secrets
+
+                self.secret_key = _secrets.token_urlsafe(48)
+                self.ephemeral_secret_key = True
+
+        if not self.database_url:
+            if self.serverless:
+                self.database_url = f"sqlite:///{Path(self.sqlite_fallback_dir) / 'casino.db'}"
+            else:
+                self.database_url = f"sqlite:///{self.base_dir / 'data' / 'casino.db'}"
+        return self
+
+    #: Set by the validator when a throwaway signing key had to be minted.
+    ephemeral_secret_key: bool = False
+
+    @property
+    def persistence_is_temporary(self) -> bool:
+        """True when balances will not survive a restart/cold start."""
+        return self.serverless and self.database_url.startswith("sqlite")
+
     @property
     def is_production(self) -> bool:
         return self.environment.lower() == "production"
@@ -90,7 +135,13 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
-    (s.base_dir / "data").mkdir(parents=True, exist_ok=True)
+    for directory in (s.base_dir / "data", Path(s.sqlite_fallback_dir)):
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            # Read-only bundle directory (serverless). The engine only needs a
+            # writable path for SQLite, which the validator has already chosen.
+            pass
     if s.is_production and s.secret_key.startswith("dev-only"):
         raise RuntimeError(
             "Refusing to boot in production with the default SECRET_KEY. "

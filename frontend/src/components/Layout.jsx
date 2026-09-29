@@ -18,7 +18,7 @@ export default function Layout() {
 
   return (
     <div className="app">
-      <ProviderBanner provider={config?.provider} />
+      <ProviderBanner provider={config?.provider} deployment={config?.deployment} />
 
       <header className="topbar">
         <Link to="/" className="brand">

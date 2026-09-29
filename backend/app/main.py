@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -26,7 +27,8 @@ from .models import User, UserRole
 from .payments import provider_status
 from .routers import admin, auth, crash, games, misc, wallet
 from .security import hash_password
-from .services.crash_loop import bootstrap, ops_loop, run_forever
+from .services import crash_loop
+from .services.crash_loop import ops_loop, run_forever
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,18 +69,56 @@ def seed_admin() -> None:
         )
 
 
+# The lifespan hook below is the normal way to boot. Serverless platforms do
+# not reliably run it, so the same work is available as an idempotent function
+# and re-run (cheaply) by the first request that arrives. Whichever happens
+# first wins; both are safe to call more than once.
+_bootstrapped = False
+_bootstrap_lock = threading.Lock()
+
+
+def bootstrap_app() -> None:
+    """Create tables, seed the operator account, warm the crash round."""
+    global _bootstrapped
+    if _bootstrapped:
+        return
+    with _bootstrap_lock:
+        if _bootstrapped:
+            return
+        init_db()
+        seed_admin()
+        crash_loop.bootstrap()
+        status = provider_status()
+        log.info(
+            "payments: provider=%s mode=%s %s",
+            status.get("provider"),
+            status.get("mode"),
+            status.get("warning") or "",
+        )
+        if settings.ephemeral_secret_key:
+            log.warning(
+                "SECRET_KEY was not set: using a throwaway key. Sessions will "
+                "not survive a restart. Set SECRET_KEY in the environment."
+            )
+        if settings.persistence_is_temporary:
+            log.warning(
+                "Database is %s - on a serverless platform this file is "
+                "ephemeral, so player balances reset. Set DATABASE_URL to a "
+                "Postgres URL if the data must persist.",
+                settings.database_url,
+            )
+        _bootstrapped = True
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
-    seed_admin()
-    status = provider_status()
-    log.info(
-        "payments: provider=%s mode=%s %s",
-        status.get("provider"),
-        status.get("mode"),
-        status.get("warning") or "",
-    )
-    bootstrap()
+    bootstrap_app()
+    if settings.serverless:
+        # No background loops: shared games advance from the clock on request
+        # instead (see services/crash_loop.advance).
+        log.info("serverless mode: background loops disabled, clock-driven games")
+        yield
+        return
     stop = asyncio.Event()
     tasks = [
         asyncio.create_task(run_forever(stop), name="crash-loop"),
@@ -116,6 +156,15 @@ app.add_middleware(
 
 
 @app.middleware("http")
+async def ensure_ready(request: Request, call_next):
+    """First request wins the boot race on platforms with no lifespan hook."""
+    if not _bootstrapped:
+        # touch the DB in a worker thread: bootstrap does blocking I/O
+        await asyncio.to_thread(bootstrap_app)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -149,6 +198,13 @@ def health():
         "app": settings.app_name,
         "environment": settings.environment,
         "provider": provider_status(),
+        "deployment": {
+            "serverless": settings.serverless,
+            "demo_mode": settings.demo_mode,
+            "background_loops": not settings.serverless,
+            "websockets": not settings.serverless,
+            "balances_persist": not settings.persistence_is_temporary,
+        },
     }
 
 
@@ -160,10 +216,22 @@ if FRONTEND_DIST.is_dir():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
+        # An unknown /api/... path must NOT fall through to the single-page app:
+        # returning index.html for a mistyped endpoint gives the client a JSON
+        # parse error instead of a 404 that says what went wrong.
+        if full_path.startswith("api/"):
+            return JSONResponse(
+                status_code=404,
+                content={"detail": f"No such endpoint: /{full_path}"},
+            )
         candidate = FRONTEND_DIST / full_path
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        # Never let the browser cache index.html: it points at hashed assets
+        # that change on every deploy.
+        return FileResponse(
+            FRONTEND_DIST / "index.html", headers={"Cache-Control": "no-store"}
+        )
 else:
 
     @app.get("/", include_in_schema=False)

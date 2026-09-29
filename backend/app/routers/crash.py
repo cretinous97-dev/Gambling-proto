@@ -13,15 +13,20 @@ from ..rng import verify as rng_verify
 from ..schemas import CashoutIn, CrashBetIn, money_field
 from ..security import CurrentUser, Db, decode_token
 from ..services import bets as bet_svc
-from ..services.crash_loop import crash_history, hub
+from ..config import settings
+from ..services.crash_loop import advance, crash_history, hub
 
 router = APIRouter(prefix="/api/crash", tags=["crash"])
 
 
 def _live_round(db) -> GameRound:
-    row = db.execute(
-        select(GameRound).order_by(GameRound.round_number.desc())
-    ).scalars().first()
+    """Fetch the live round, first moving it to wherever the clock says it is.
+
+    `advance` costs one indexed read plus (rarely) a conditional UPDATE. Paying
+    that on every request is what lets the game run with no background process
+    at all - which is the only way it works on a serverless platform.
+    """
+    row = advance(db)
     if row is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Crash is starting up.")
     return row
@@ -70,8 +75,12 @@ def _round_payload(db, row: GameRound, user: User | None = None) -> dict:
                 "current_value": int(b.stake * multiplier) if not b.settled else b.payout,
             }
 
+    # One vocabulary for clients: a fully settled round is still "crashed" as
+    # far as the screen is concerned. Leaking the internal enum here made
+    # GET /state and GET /state/me disagree with the websocket feed.
+    phase = "crashed" if row.status is RoundStatus.settled else row.status.value
     return {
-        "phase": row.status.value,
+        "phase": phase,
         "round_number": row.round_number,
         "server_seed_hash": row.server_seed_hash,
         "started_at": row.started_at,
@@ -193,6 +202,21 @@ async def crash_ws(websocket: WebSocket, token: str | None = None):
     bet state - and no websocket can ever move money. Cash-out goes through
     POST /api/crash/cashout so it is authenticated and rate-limited like any
     other money endpoint."""
+    if settings.serverless:
+        # Serverless platforms do not hold long-lived sockets. Say so plainly
+        # (1000 + a reason) so the client stops retrying and switches to the
+        # REST poll, which drives the same state machine.
+        await websocket.accept()
+        await websocket.send_json(
+            {
+                "type": "crash.error",
+                "detail": "websockets are not available on this deployment; "
+                          "poll GET /api/crash/state instead",
+            }
+        )
+        await websocket.close(code=1000)
+        return
+
     user = None
     if token:
         db = SessionLocal()

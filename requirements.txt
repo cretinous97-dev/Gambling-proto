@@ -1,0 +1,19 @@
+# Vercel installs Python dependencies from the project root, so this file is
+# the deploy-time list. backend/requirements.txt is the development list; a test
+# (backend/tests/test_deploy_config.py) fails if the two ever drift apart.
+#
+# uvicorn is deliberately absent: the serverless runtime provides its own ASGI
+# server, and pulling in the [standard] extras only slows the cold start.
+fastapi==0.115.6
+sqlalchemy==2.0.36
+pydantic==2.10.4
+pydantic-settings==2.7.0
+python-multipart==0.0.20
+PyJWT==2.10.1
+bcrypt==4.2.1
+email-validator==2.2.0
+
+# Postgres driver. The default deployment uses SQLite in /tmp, which is wiped on
+# restart - fine for a demo, useless for anything else. Point DATABASE_URL at a
+# hosted Postgres (Neon, Supabase, RDS) and balances survive.
+psycopg[binary]==3.2.3

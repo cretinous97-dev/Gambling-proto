@@ -165,15 +165,21 @@ export function Copyable({ value, label = null }) {
   )
 }
 
-export function ProviderBanner({ provider }) {
+export function ProviderBanner({ provider, deployment }) {
   if (!provider) return null
+  const lines = []
   if (provider.mode === 'simulation') {
-    return (
-      <div className="demo-banner">
-        DEMO / SANDBOX MODE — payments are simulated. No real money is accepted or paid out.
-        Set PAYMENT_PROVIDER + provider keys on the server to go live.
-      </div>
+    lines.push(
+      'DEMO / SANDBOX MODE — payments are simulated. No real money is accepted or paid out.',
     )
   }
-  return null
+  if (deployment && deployment.balances_persist === false) {
+    // Say it before someone deposits $500 into a test deployment and watches it
+    // vanish on the next cold start.
+    lines.push(
+      'Test deployment: balances reset when the server restarts. Do not use real money here.',
+    )
+  }
+  if (lines.length === 0) return null
+  return <div className="demo-banner">{lines.join(' ')}</div>
 }

@@ -214,9 +214,19 @@ export function openCrashSocket(onMessage) {
     }
     socket.onopen = () => {
       retry = 0
+      opened = true
     }
+    let opened = false
+    let failures = 0
     socket.onclose = () => {
       if (closed) return
+      // A deployment with no websocket support (serverless) rejects the
+      // upgrade immediately. Give up after a few tries and let the REST poll
+      // in the page take over, instead of reconnecting forever.
+      if (!opened) {
+        failures += 1
+        if (failures >= 3) return
+      }
       // exponential backoff, capped - a dropped socket must never hammer the API
       retry = Math.min(retry + 1, 6)
       setTimeout(connect, 500 * 2 ** retry)

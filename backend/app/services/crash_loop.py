@@ -17,7 +17,8 @@ import contextlib
 import logging
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 
 from ..config import settings
 from ..db import session_scope
@@ -162,13 +163,13 @@ def bootstrap() -> None:
     """Create the first round synchronously at startup.
 
     Without this, GET /api/crash/state returns 503 for the second or so before
-    the loop's first tick - which reads like an outage during a deploy.
+    the loop's first tick - which reads like an outage during a deploy. On
+    serverless there is no lifespan hook to rely on, so requests call
+    `advance()` instead and this is only a warm-up.
     """
     with session_scope() as db:
-        existing = db.execute(
-            select(GameRound).order_by(GameRound.round_number.desc())
-        ).scalars().first()
-        if existing is None or existing.status is RoundStatus.settled:
+        existing = latest_round(db)
+        if existing is None:
             _create_round(db)
 
 
@@ -305,6 +306,97 @@ async def _run_one_round(stop: asyncio.Event) -> None:
     await asyncio.sleep(CRASHED_SECONDS)
 
 
+# ---------------------------------------------------------------------------
+# Clock-driven state machine
+# ---------------------------------------------------------------------------
+# The loop above is the right design for a long-running process: one writer,
+# always ticking. A serverless deployment has no such process - the function is
+# frozen between requests and several instances run at once - so the same state
+# machine is driven from the clock instead, by whichever request arrives first.
+#
+# Everything below is therefore idempotent and safe to call concurrently from
+# any number of instances: every state change is a conditional UPDATE, so
+# exactly one caller wins and the losers simply read the new state.
+
+
+def latest_round(db) -> GameRound | None:
+    return (
+        db.execute(select(GameRound).order_by(GameRound.round_number.desc()))
+        .scalars()
+        .first()
+    )
+
+
+def _claim(db, round_id: str, from_status: RoundStatus, to_status: RoundStatus, **values) -> bool:
+    """Move a round between states, but only if it is still in `from_status`.
+
+    Returns True when THIS caller performed the transition. Two instances that
+    both decide the round should end will race here, and only one gets True -
+    which is what stops a shared round being settled twice.
+    """
+    result = db.execute(
+        update(GameRound)
+        .where(GameRound.id == round_id, GameRound.status == from_status)
+        .values(status=to_status, **values)
+    )
+    db.flush()
+    return result.rowcount == 1
+
+
+def advance(db) -> GameRound:
+    """Advance the crash round to wherever the wall clock says it should be.
+
+    Called at the top of every crash request. In the always-on deployment the
+    loop calls it far more often; nothing here assumes how often it runs.
+    """
+    row = latest_round(db)
+    now = utcnow()
+
+    if row is None:
+        return _create_round(db)
+
+    created = row.created_at or now
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=now.tzinfo)
+
+    # ---- betting window -------------------------------------------------
+    if row.status is RoundStatus.betting:
+        if (now - created).total_seconds() >= BETTING_SECONDS:
+            if _claim(db, row.id, RoundStatus.betting, RoundStatus.running, started_at=now):
+                db.refresh(row)
+                log.info("crash: round %s in flight", row.round_number)
+        return row
+
+    # ---- in flight ------------------------------------------------------
+    if row.status is RoundStatus.running:
+        started = row.started_at or now
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=now.tzinfo)
+        elapsed = (now - started).total_seconds()
+        point = float(row.crash_point)
+        if crash_engine.multiplier_at(elapsed) >= point or elapsed > MAX_ROUND_SECONDS:
+            if _claim(db, row.id, RoundStatus.running, RoundStatus.crashed, crashed_at=now):
+                db.refresh(row)
+                settle_round(db, row, elapsed)
+                db.refresh(row)
+                log.info("crash: round %s busted at %.2fx", row.round_number, point)
+        return row
+
+    # ---- bust on screen, then the next round ---------------------------
+    marker = row.settled_at or row.crashed_at or created
+    if marker.tzinfo is None:
+        marker = marker.replace(tzinfo=now.tzinfo)
+    if (now - marker).total_seconds() >= CRASHED_SECONDS:
+        if latest_round(db).id == row.id:  # nobody else opened one already
+            try:
+                return _create_round(db)
+            except IntegrityError:
+                # another instance created round N+1 first; use theirs
+                db.rollback()
+                return latest_round(db)
+    return row
+
+
 async def ops_loop(stop: asyncio.Event, interval_s: int = 300) -> None:
     """Periodic housekeeping: void abandoned bets, expire bonuses, refresh VIP."""
     while not stop.is_set():
@@ -319,14 +411,19 @@ async def ops_loop(stop: asyncio.Event, interval_s: int = 300) -> None:
 
 
 def current_round_state(db) -> dict:
-    """REST fallback for clients that cannot hold a websocket open."""
-    r = db.execute(
-        select(GameRound).order_by(GameRound.round_number.desc())
-    ).scalars().first()
+    """REST fallback for clients that cannot hold a websocket open.
+
+    Also the heartbeat that drives the game on serverless: reading the state is
+    what moves the round forward when no background loop exists.
+    """
+    r = advance(db)
     if r is None:
         return {"phase": "starting", "round_number": 0}
+    # a freshly busted round stays on screen for CRASHED_SECONDS; the client
+    # only understands betting/running/crashed
+    phase = "crashed" if r.status is RoundStatus.settled else r.status.value
     return {
-        "phase": r.status.value,
+        "phase": phase,
         "round_number": r.round_number,
         "server_seed_hash": r.server_seed_hash,
         "started_at": r.started_at,
