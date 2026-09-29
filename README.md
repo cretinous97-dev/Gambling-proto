@@ -27,6 +27,7 @@ licence and **your** merchant account. See [Your part to do](#your-part-to-do).
 - [Compliance and player protection](#compliance-and-player-protection)
 - [Deploying](#deploying)
 - [Configuration](#configuration)
+- [Banking methods](#banking-methods--adding-a-payment-rail-without-a-deploy)
 - [Testing](#testing)
 - [Project layout](#project-layout)
 - [Known gaps](#known-gaps)
@@ -241,6 +242,46 @@ image of player money). `GET /api/wallet/integrity` and the admin health screen
 both assert the global sum is zero, and the test suite asserts it after every
 scenario. If it is ever non-zero, something is wrong and the app is designed to
 make that loud.
+
+#### Money types, and why they are integers
+
+Amounts are **BIGINT minor units** — integer cents, integer ngultrum, integer
+yen. Never floating point, and deliberately not `NUMERIC` either:
+
+* every card scheme and wallet API takes and returns integer minor units
+  (Adyen `amount.value`, Stripe `amount`, mBoB the same), so integer storage
+  means an amount is never re-rounded on the way to the processor;
+* the ledger invariant is *"entries sum to exactly zero"*. With integers that
+  is an exact equality; with a decimal type it is a comparison you have to get
+  the scale right on, in every query, forever;
+* integer addition cannot lose a unit, so there is no rounding mode to argue
+  about — because there is no rounding.
+
+If you want decimals, they are already there. `backend/sql/schema.sql` publishes
+two **NUMERIC views**, computed by exact NUMERIC division, which are read-only:
+
+```sql
+CREATE VIEW wallets AS       -- balance / locked / available as numeric(20,2)
+CREATE VIEW transactions AS  -- one ledger posting: amount, balance_after
+```
+
+Storage stays exact and integer; every decimal an analyst, a BI tool or an
+auditor reads is exact too. Both are validated by PostgreSQL's own parser in
+the test suite, so a schema that does not parse fails the build rather than
+failing on the database that holds the money.
+
+#### Table names
+
+| You asked for | Where it is |
+|---|---|
+| Users | `users` — auth, KYC status, limits, locale and currency |
+| Wallets | `balances` (live balance per account) + `ledger_entries` (the record); read them as the `wallets` view |
+| Transactions | `ledger_transactions` + `ledger_entries`; read them as the `transactions` view |
+| BankingMethods | `banking_methods` — the banks added in the admin panel |
+
+`create_all` builds these on first boot. On a real deployment run
+`backend/sql/schema.sql` once, or adopt Alembic — the file is generated from the
+models and a test fails if it drifts.
 
 ### Deposits
 
@@ -470,6 +511,64 @@ full annotated list. The safety-relevant defaults:
 | `GEO_ENFORCEMENT` | `false` | the edge's country header is not trusted by default |
 | `SECRET_KEY` | insecure default | app refuses to boot in prod with it |
 | `FIRST_DEPOSIT_BONUS_WAGER_X` | `30` | rollover on the welcome bonus |
+
+### Banking methods — adding a payment rail without a deploy
+
+Which bank, wallet or acquirer a player can use is a commercial decision, so it
+is data. **Admin → Banking methods** adds, edits and switches off payment
+pathways; the change is live for the markets it names on the next transaction,
+with no release and no restart.
+
+Each pathway carries a bank/method name, country code (ISO-3166 alpha-2, or `*`
+for every country), currency (ISO-4217, or `*`), an account/merchant id, an
+optional API endpoint, an optional credential variable, limits, a fee in basis
+points, a priority and an active switch.
+
+**How a pathway is chosen.** A pathway matches when it is active, its country is
+the player's country or `*`, its currency is the transaction currency or `*`,
+the direction is enabled, and the amount is inside its own bounds. Among the
+matches, the most *specific* wins — `BT`/`BTN` beats `BT`/`*` beats `*`/`*` —
+and priority breaks ties, then id. The same inputs always produce the same
+answer, and **Banking methods → Why** prints the full ordered candidate list
+with a reason against every row, which is the answer to "why did this player get
+that bank".
+
+The wildcard row is what keeps global access open: a `*`/`*` pathway at a high
+priority number serves every market nobody has configured yet, so adding a
+Bhutanese rail does not close the rest of the world. An unconfigured
+deployment (an empty table) behaves exactly as it did before pathways existed.
+
+**Credentials never enter the database.** The credential field takes the *name*
+of an environment variable (`MBOB_API_KEY`), never the key — the API rejects
+anything that looks like a secret. The panel reports whether that variable is
+present in the running process, which is the one thing an operator needs to
+debug a rail and the one thing the database cannot tell them.
+
+**Nothing is ever deleted.** `Retire` deactivates. Settled transactions point at
+their pathway forever, and a reconciliation report with holes in it is worse
+than no report. Every change is audit-logged with before and after values.
+
+**Two ways a rail settles.** If the pathway has an API endpoint, the adapter
+pushes an initiation request to it, signed with the key in the named variable,
+and shows the player whatever the rail says to do next. If it has no endpoint —
+common for domestic rails — the player is shown the pathway's instructions and
+a unique reference, and the deposit is credited when the rail's **signed
+webhook** arrives at `/api/payments/webhooks/bank_transfer`, or when an operator
+confirms it after the money appears on the statement. Both go through the same
+idempotent credit path.
+
+Callbacks are authenticated with HMAC-SHA256 over the raw body, keyed on
+`BANK_TRANSFER_WEBHOOK_SECRET`. A missing secret means callbacks are *refused*,
+not trusted. A callback that disagrees with the deposit's amount is refused
+with a 422 and recorded, because a signature proves an event is authentic, not
+that it is correct.
+
+**Out-of-band payouts.** A rail with no payout API leaves an approved withdrawal
+at `approved` with the funds still held. **Admin → Withdrawals → mark paid**
+closes the loop, and requires the bank's transaction reference — "marked paid"
+with no evidence is how a payout queue becomes unauditable. Until then the money
+stays in `user_locked`, so it cannot be spent twice while a transfer is in
+flight.
 
 ### Countries, languages and currencies
 

@@ -39,7 +39,17 @@ os.environ["VERCEL"] = "1"
 os.environ["VERCEL_ENV"] = "production"
 os.environ["DATABASE_URL"] = f"sqlite:///{DB_PATH}"
 os.environ["CORS_ORIGINS"] = "*"
+os.environ["ENV_FILE"] = os.devnull         # ignore any developer's backend/.env
 os.environ.pop("SECRET_KEY", None)          # force the ephemeral-key path
+
+# Pin the operator this script signs in as, rather than relying on it
+# matching the config default. The Makefile runs these from `backend/`, where
+# pydantic-settings reads a developer's `backend/.env`; their ADMIN_EMAIL
+# would replace the account this script logs in with and turn a real
+# assertion into a 401. ENV_FILE above closes that door - and naming the
+# credentials here means the script still works if the default ever changes.
+os.environ["ADMIN_EMAIL"] = "admin@casino.example.com"
+os.environ["ADMIN_PASSWORD"] = "Admin!2345"
 sys.path.insert(0, str(ROOT / "backend"))
 
 import httpx  # noqa: E402

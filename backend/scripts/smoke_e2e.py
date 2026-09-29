@@ -16,13 +16,46 @@ repeatedly against the same database.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
+import os
 import sys
 import time
 import urllib.error
 import urllib.request
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000").rstrip("/")
+
+
+def operator_credentials() -> tuple[str, str]:
+    """The operator this run should sign in as.
+
+    Follows the same resolution order as the app: a real environment variable
+    wins, then `backend/.env` (the Makefile runs these from `backend/`), then
+    the documented default. Reading `.env` matters because the server the dev
+    is pointing at resolved its operator the same way - hardcoding the default
+    here would sign in as an account that server never created, and report the
+    app broken when the smoke run is what is wrong.
+    """
+    email = os.environ.get("ADMIN_EMAIL")
+    password = os.environ.get("ADMIN_PASSWORD")
+    if not (email and password):
+        env_file = Path(__file__).resolve().parent.parent / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                key, _, value = line.partition("=")
+                key, value = key.strip(), value.strip().strip("'\"")
+                if not value or key.startswith("#"):
+                    continue
+                if key == "ADMIN_EMAIL" and not email:
+                    email = value
+                elif key == "ADMIN_PASSWORD" and not password:
+                    password = value
+    return (email or "admin@casino.example.com", password or "Admin!2345")
+
+
+ADMIN_EMAIL, ADMIN_PASSWORD = operator_credentials()
 STAMP = str(int(time.time()))[-6:]
 PASSWORD = "SmokeTest!2345"
 
@@ -235,7 +268,7 @@ check("cash moved into the locked account",
       f"cash={money(held['balances']['cash'])} locked={money(held['balances']['locked'])}")
 
 _, admin_login = call("POST", "/api/auth/login",
-                      {"email": "admin@casino.example.com", "password": "Admin!2345"}, expect=200)
+                      {"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}, expect=200)
 admin = admin_login["access_token"]
 check("admin can sign in", bool(admin))
 
