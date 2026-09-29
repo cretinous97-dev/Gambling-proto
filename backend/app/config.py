@@ -16,7 +16,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        # Relative paths resolve against the working directory, which for this
+        # project means `backend/.env`. Point ENV_FILE somewhere else - at
+        # /dev/null, for instance - to run a process that must not be
+        # influenced by a developer's local file: the serverless smoke and the
+        # secret-key tests both do, because they assert on what happens when a
+        # value is absent, and a local `.env` is very good at supplying it.
+        env_file=os.getenv("ENV_FILE", ".env"),
+        extra="ignore",
+    )
 
     # --- core ---------------------------------------------------------------
     app_name: str = "Naktsang Casino"
@@ -63,6 +72,23 @@ class Settings(BaseSettings):
     adyen_balance_account_id: str = ""  # required only for payouts
     cryptopay_api_key: str = ""
     cryptopay_webhook_secret: str = ""
+    # HMAC key for callbacks from locally negotiated bank/wallet rails
+    # (the paths configured in the admin panel). Without it, unsigned
+    # callbacks to /api/payments/webhooks/bank_transfer are REFUSED - a
+    # missing secret must never mean "accept anything".
+    bank_transfer_webhook_secret: str = ""
+
+    # The merchant / account id this deployment collects into, used as the
+    # default `account_id` on seeded banking pathways. NOT a secret: it is the
+    # number printed on the player's own statement and the same in test and
+    # live for a given contract. Per-pathway values live in `banking_methods`,
+    # because a global acquirer and a local bank do not share one.
+    merchant_account_id: str = ""
+
+    # Region defaults for the cashier, used when a player's country has no
+    # pathway configured yet and for the "you are paying in" hint.
+    default_country: str = "BT"
+    default_currency: str = "BTN"
 
     # --- jurisdiction policy ------------------------------------------------
     # How the platform decides which countries may register, play and move
@@ -205,6 +231,12 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
+#: Shortest SECRET_KEY allowed in production. HS256 signs with the key
+#: directly, so a short key is brute-forceable offline against any token an
+#: attacker has already seen - and tokens are handed to every player.
+MIN_SECRET_KEY_LENGTH = 32
+
+
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
@@ -215,11 +247,36 @@ def get_settings() -> Settings:
             # Read-only bundle directory (serverless). The engine only needs a
             # writable path for SQLite, which the validator has already chosen.
             pass
-    if s.is_production and s.secret_key.startswith("dev-only"):
-        raise RuntimeError(
-            "Refusing to boot in production with the default SECRET_KEY. "
-            "Set SECRET_KEY to a 64-char random value."
-        )
+    if s.is_production:
+        # The session signing key is the one secret whose absence is invisible:
+        # everything still works, and every token is forgeable. So this refuses
+        # rather than warns, and it refuses on every way of not having a key -
+        # the built-in default, an unset variable, and (the one that used to
+        # slip through) a variable that is present but empty, which is exactly
+        # what a `.env` line reading `SECRET_KEY=` produces.
+        #
+        # Length is the check because it is the only property of a key that can
+        # be judged without judging the operator: HS256 with a short key is
+        # brute-forceable offline against any token the attacker has seen.
+        key = s.secret_key or ""
+        if not key:
+            raise RuntimeError(
+                "Refusing to boot in production without SECRET_KEY. Sessions "
+                "would be signed with an empty key, which anyone can forge. "
+                'Generate one: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
+        if key.startswith("dev-only"):
+            raise RuntimeError(
+                "Refusing to boot in production with the default SECRET_KEY. "
+                "Set SECRET_KEY to a 64-char random value."
+            )
+        if len(key) < MIN_SECRET_KEY_LENGTH:
+            raise RuntimeError(
+                f"Refusing to boot in production: SECRET_KEY is {len(key)} "
+                f"characters, and a key shorter than {MIN_SECRET_KEY_LENGTH} "
+                f"is brute-forceable offline. Generate one: "
+                f'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
     return s
 
 

@@ -42,6 +42,7 @@ from ..ledger import (
 from ..models import (
     AccountKind,
     AuditLog,
+    BankingMethod,
     Deposit,
     DepositStatus,
     KycStatus,
@@ -54,9 +55,10 @@ from ..models import (
     utcnow,
 )
 from ..money import pct_of
-from ..payments import PaymentError, get_provider
+from ..payments import PaymentError, get_provider, get_provider_by_name
 from . import bonus as bonus_svc
 from . import compliance
+from . import routing
 
 log = logging.getLogger("app.payments.ledger")
 
@@ -75,6 +77,94 @@ def _ref(prefix: str) -> str:
 # ---------------------------------------------------------------------------
 # deposits
 # ---------------------------------------------------------------------------
+def _country_of(user: User, override: str | None = None) -> str:
+    """The country routing is decided on.
+
+    The account's own country, never a caller-supplied one, unless a caller
+    explicitly overrides it for a preview. A player cannot make a transaction
+    route to a pathway their account is not eligible for by sending a header:
+    eligibility is a property of the account, decided at registration, which is
+    what the KYC and jurisdiction checks already assume.
+    """
+    return (override or getattr(user, "country", "") or "").upper()
+
+
+def _resolve_pathway(
+    db: Session,
+    *,
+    user: User,
+    direction: str,
+    amount_minor: int,
+    country: str | None = None,
+    banking_method_id: str | None = None,
+) -> BankingMethod | None:
+    """Pick the pathway for this transaction, or explain why there is none.
+
+    An explicitly requested pathway is honoured only if it is actually usable:
+    active, enabled for this direction, and eligible for the player's country
+    and the amount. Otherwise a player could force a deposit through a rail the
+    operator has switched off, or through one that does not serve their market,
+    by editing the request - and the money would land in an account nobody
+    intended.
+
+    Returns None when the operator has configured nothing at all, which keeps an
+    unconfigured deployment working exactly as it did before pathways existed.
+    """
+    currency = instrument_currency(db, user)
+
+    if banking_method_id:
+        row = db.get(BankingMethod, banking_method_id)
+        if row is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "That payment method no longer exists."
+            )
+        allowed = routing.candidates(
+            db,
+            country=_country_of(user, country),
+            currency=currency,
+            direction=direction,
+            amount_minor=amount_minor,
+        )
+        if row.id not in {m.id for m in allowed}:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"{row.name} is not available for this account right now.",
+            )
+        return row
+
+    return routing.resolve(
+        db,
+        country=_country_of(user, country),
+        currency=currency,
+        direction=direction,
+        amount_minor=amount_minor,
+    )
+
+
+def instrument_currency(db: Session, user: User) -> str:
+    """The currency this player's payments are denominated in.
+
+    The **market's** currency, from the account's country - deliberately not the
+    player's `display_currency`. Those answer different questions. Display
+    currency is what a figure is converted to on the way to the screen, and a
+    player is entitled to read their balance in USD. Payment currency is what
+    the rail on the other end settles in: a player in Bhutan pays mBoB in
+    ngultrum whatever they prefer to read, and a request denominated in USD to
+    a ngultrum rail is one the rail will reject.
+
+    Falls back to the deployment default for a market with no mapping, which is
+    what keeps global access working for countries nobody has configured.
+    """
+    country = _country_of(user)
+    if country:
+        from ..i18n import currency_for
+
+        resolved = currency_for(country)
+        if resolved:
+            return resolved
+    return settings.default_currency
+
+
 def create_deposit(
     db: Session,
     user: User,
@@ -83,6 +173,8 @@ def create_deposit(
     method: PaymentMethod,
     idempotency_key: str | None = None,
     bonus_code: str | None = None,
+    banking_method_id: str | None = None,
+    country: str | None = None,
 ) -> Deposit:
     compliance.assert_deposit_limits(amount)
     compliance.assert_can_deposit(db, user, amount)
@@ -94,12 +186,35 @@ def create_deposit(
         if existing is not None:
             return existing
 
-    provider = get_provider()
+    # Which pathway carries this is an operator decision, made in the admin
+    # panel, resolved here from the player's country and the transaction
+    # currency. `banking_method_id` forces a specific one, which is what the
+    # cashier sends when the player picks a bank from the list.
+    pathway = _resolve_pathway(
+        db,
+        user=user,
+        direction=routing.DEPOSIT,
+        amount_minor=amount,
+        country=country,
+        banking_method_id=banking_method_id,
+    )
+    provider = get_provider_by_name(routing.effective_provider(pathway))
+
+    # Denominate the deposit in the currency the rail actually settles in. A
+    # pathway pinned to one currency wins; otherwise the player's market
+    # currency. Getting this wrong would hand a ngultrum rail a dollar amount
+    # and a mismatch the provider rejects - or worse, one it accepts.
+    deposit_currency = instrument_currency(db, user)
+    if pathway is not None and pathway.currency != routing.ANY:
+        deposit_currency = pathway.currency
+
     deposit = Deposit(
         user_id=user.id,
         amount=amount,
         method=method,
+        currency=deposit_currency,
         provider=provider.name,
+        banking_method_id=pathway.id if pathway else None,
         status=DepositStatus.pending,
         idempotency_key=idempotency_key,
     )
@@ -113,7 +228,7 @@ def create_deposit(
         deposit.failure_reason = str(exc)[:255]
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Payment provider error: {exc}")
 
-    deposit.fee = intent.fee
+    deposit.fee = intent.fee + (pct_of(amount, pathway.fee_bps / 100) if pathway else 0)
     deposit.bonus_code = bonus_code
     deposit.status = (
         DepositStatus(intent.status)
@@ -250,6 +365,7 @@ def request_withdrawal(
     method: PaymentMethod,
     destination: str,
     idempotency_key: str | None = None,
+    banking_method_id: str | None = None,
 ) -> Withdrawal:
     compliance.assert_withdrawal_limits(amount)
     compliance.assert_can_withdraw(db, user, amount)
@@ -281,6 +397,17 @@ def request_withdrawal(
             f"through before they can be withdrawn.",
         )
 
+    # Which rail pays this out is the operator's decision, same as deposits.
+    # Resolved before the hold so an unroutable payout fails without moving
+    # money into `user_locked` and needing a release that nobody watches.
+    payout_pathway = _resolve_pathway(
+        db,
+        user=user,
+        direction=routing.WITHDRAWAL,
+        amount_minor=amount,
+        banking_method_id=banking_method_id,
+    )
+
     wd = Withdrawal(
         user_id=user.id,
         amount=amount,
@@ -288,7 +415,8 @@ def request_withdrawal(
         net_amount=net,
         method=method,
         destination=_mask(method, destination),
-        provider=get_provider().name,
+        provider=get_provider_by_name(routing.effective_provider(payout_pathway)).name,
+        banking_method_id=payout_pathway.id if payout_pathway else None,
         status=WithdrawalStatus.requested,
         idempotency_key=idempotency_key,
     )
@@ -424,7 +552,15 @@ def review_withdrawal(
 
 
 def _submit_payout(db: Session, withdrawal: Withdrawal, admin: User | None) -> None:
-    provider = get_provider()
+    # The rail that was chosen when the payout was requested, not the
+    # deployment default: a player who withdrew to a Bhutanese wallet has to be
+    # paid out through the Bhutanese rail, whatever else has changed since.
+    pathway = (
+        db.get(BankingMethod, withdrawal.banking_method_id)
+        if withdrawal.banking_method_id
+        else None
+    )
+    provider = get_provider_by_name(routing.effective_provider(pathway))
     try:
         result = provider.create_payout(db, withdrawal)
     except PaymentError as exc:
@@ -504,6 +640,80 @@ def apply_payout_status(
     return withdrawal
 
 
+def confirm_payout_paid(
+    db: Session, withdrawal: Withdrawal, admin: User, *, reference: str, note: str | None = None
+) -> Withdrawal:
+    """Mark a payout as sent, for a rail that pays out by hand.
+
+    Not every rail has a payout API, and the ones that do not are usually the
+    domestic ones: a bank transfer made from the institution's own console, a
+    wallet paid from a phone. The reviewer approves, the operator makes the
+    transfer, and this is how the ledger learns that it happened.
+
+    Without it the money is stuck: the withdrawal sits at `approved` and the
+    funds stay in `user_locked` forever, because the block on the player's
+    balance is only released by a terminal state. An operator has to be able to
+    close that loop, and the reference they supply is what reconciles the
+    payout against the institution's statement.
+
+    Deliberately requires a reference. "Marked paid" with no evidence is how a
+    payout queue becomes unauditable.
+    """
+    if withdrawal.status is WithdrawalStatus.paid:
+        return withdrawal                       # idempotent
+    if withdrawal.status not in (WithdrawalStatus.approved, WithdrawalStatus.under_review):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{withdrawal.id} is {withdrawal.status.value}; only an approved "
+            f"payout can be confirmed as sent.",
+        )
+    reference = (reference or "").strip()
+    if len(reference) < 3:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Record the bank's transaction reference - it is what reconciles "
+            "this payout against the statement.",
+        )
+
+    before = withdrawal.status.value
+    settle_withdrawal(
+        db,
+        withdrawal.user_id,
+        withdrawal.amount,
+        withdrawal.fee,
+        reference=f"withdrawal-paid:{withdrawal.id}",
+        idempotency_key=f"withdrawal-settle:{withdrawal.id}",
+    )
+    withdrawal.status = WithdrawalStatus.paid
+    withdrawal.provider_ref = reference[:128]
+    withdrawal.paid_at = utcnow()
+    if note:
+        withdrawal.review_note = ((withdrawal.review_note or "") + f" | {note}")[:500]
+
+    db.add(
+        AuditLog(
+            actor_id=admin.id,
+            actor_email=admin.email,
+            action="withdrawal.mark_paid",
+            target=withdrawal.id,
+            before={"status": before},
+            after={"status": "paid", "reference": reference},
+        )
+    )
+    bonus_svc.notify(
+        db,
+        withdrawal.user_id,
+        "Withdrawal paid",
+        f"{withdrawal.net_amount / 100:.2f} has been sent. Reference {reference}.",
+    )
+    db.flush()
+    log.info(
+        "admin %s marked withdrawal %s paid (reference %s)",
+        admin.email, withdrawal.id, reference,
+    )
+    return withdrawal
+
+
 def cancel_withdrawal(db: Session, user: User, withdrawal: Withdrawal) -> Withdrawal:
     if withdrawal.user_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not your withdrawal.")
@@ -575,8 +785,20 @@ def record_rejected_webhook(
         log.exception("could not record a rejected %s webhook", provider)
 
 
-def ingest_webhook(db: Session, raw_body: bytes, signature: str | None) -> dict:
-    provider = get_provider()
+def ingest_webhook(
+    db: Session,
+    raw_body: bytes,
+    signature: str | None,
+    provider_name: str | None = None,
+) -> dict:
+    """Verify and apply one provider callback.
+
+    `provider_name` is the adapter the callback arrived *for*, which is not
+    necessarily the deployment default: once pathways exist, an operator can be
+    settling through several rails at once, and each one posts to its own URL.
+    Falling back to the default keeps single-provider deployments unchanged.
+    """
+    provider = get_provider_by_name(provider_name) if provider_name else get_provider()
     ok, event = provider.verify_webhook(raw_body, signature)
 
     # Every provider gets a dedup key, whether it supplied one or not.

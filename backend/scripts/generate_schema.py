@@ -42,9 +42,33 @@ HEADER = """\
 --   2. run this file once, or let Alembic manage the same shape going forward
 --   3. never let the application role own the schema in production
 --
--- Money columns are BIGINT minor units (cents) - never floating point. The
--- ledger is the source of truth; `balances` is a materialised cache of it, and
--- `ledger_entries` sums to zero per transaction by construction.
+-- MONEY MODEL (read this before changing any amount column)
+--
+-- Money is stored as BIGINT *minor units* - integer cents, integer ngultrum,
+-- integer yen. Never floating point, and deliberately not NUMERIC either:
+--
+--   * every card scheme and wallet API in existence (Adyen, Stripe, mBoB)
+--     takes and returns integer minor units, so integer storage means an amount
+--     is never re-rounded on the way to the processor;
+--   * the ledger invariant is that `ledger_entries` sums to exactly zero per
+--     transaction. With integers that is an exact equality; with a decimal
+--     type it is a comparison you have to get the scale right on, in every
+--     query, forever;
+--   * addition and subtraction of integers cannot lose a unit. There is no
+--     rounding mode to argue about, because there is no rounding.
+--
+-- For reporting, BI and anything that would rather read a decimal, the
+-- NUMERIC views at the end of this file (`wallets`, `transactions`) divide by
+-- 100 with NUMERIC arithmetic, which is exact. They are read-only: nothing
+-- writes through them. So the storage stays exact and integer, and every
+-- decimal figure an analyst or an auditor sees is exact too.
+--
+-- Naming: the tables an operator asked for are all here. Users is `users`;
+-- Wallets is `balances` (the live balance, a cache of the ledger) backed by
+-- `ledger_entries` (the record); Transactions is `ledger_transactions` plus
+-- `ledger_entries`; and the custom banks added in the admin panel are
+-- `banking_methods`. The `wallets` and `transactions` views expose the first
+-- three under those names.
 """
 
 
@@ -84,15 +108,66 @@ def ordered_statements() -> list[str]:
             return (1, statement)
         if statement.startswith("CREATE INDEX") or statement.startswith("CREATE UNIQUE INDEX"):
             return (3, statement)
+        if statement.startswith("CREATE VIEW"):
+            return (4, statement)
         return (2, statement)
 
     return sorted(ddl_statements(), key=rank)
 
 
+def reporting_views(settlement_currency: str) -> list[str]:
+    """Read-only decimal views over the integer ledger.
+
+    Every money column here is NUMERIC, computed by NUMERIC division, so the
+    figures are exact rather than approximated. They are views and not tables
+    on purpose: a materialised decimal copy of a balance is a second source of
+    truth, and the whole point of this schema is that there is only one.
+
+    `wallets` gives one row per (owner, account kind) - the same grain as
+    `balances`, which is what "real-time balance tracking" means here: the row
+    is updated in the same transaction as the ledger entries that justify it,
+    and `wallets` shows it as a decimal.
+
+    `transactions` is the flat posting list: one row per ledger entry, joined
+    to the transaction that grouped it, so a statement can be produced with a
+    single indexed query and no application-side arithmetic. Nothing in it can
+    be updated or deleted through the view, which is what "non-destructive
+    ledger" has to mean to survive an audit.
+    """
+    return [
+        f"""CREATE VIEW wallets AS
+SELECT
+    b.id                                                    AS wallet_id,
+    b.user_id,
+    b.kind                                                  AS account_kind,
+    (b.amount::numeric(20, 2) / 100)                        AS balance,
+    (b.locked::numeric(20, 2) / 100)                        AS locked,
+    ((b.amount - b.locked)::numeric(20, 2) / 100)           AS available,
+    '{settlement_currency}'                                 AS settlement_currency,
+    b.updated_at
+FROM balances b;""",
+        """CREATE VIEW transactions AS
+SELECT
+    t.id                                        AS transaction_id,
+    t.type                                      AS transaction_type,
+    t.status,
+    t.user_id,
+    t.reference,
+    t.memo,
+    e.kind                                      AS account_kind,
+    (e.amount::numeric(20, 2) / 100)            AS amount,
+    (e.balance_after::numeric(20, 2) / 100)     AS balance_after,
+    t.created_at
+FROM ledger_transactions t
+JOIN ledger_entries e ON e.transaction_id = t.id;""",
+    ]
+
+
 def render() -> str:
     from app.config import settings
 
-    body = "\n\n".join(ordered_statements())
+    statements = ordered_statements() + reporting_views(settings.settlement_currency)
+    body = "\n\n".join(statements)
     return HEADER.format(app=settings.app_name) + "\n" + body + "\n"
 
 

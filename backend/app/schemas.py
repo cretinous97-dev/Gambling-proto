@@ -30,6 +30,12 @@ class RegisterIn(BaseModel):
     phone: str | None = Field(default=None, max_length=32)
     accepts_terms: bool
     bonus_code: str | None = Field(default=None, max_length=32)
+    #: Optional localisation at signup. All three fall back to the account's
+    #: country, so omitting them gives a Bhutanese player ngultrum and a German
+    #: player euro rather than defaulting everyone to English and dollars.
+    language: str | None = Field(default=None, max_length=8)
+    locale: str | None = Field(default=None, max_length=16)
+    display_currency: str | None = Field(default=None, max_length=3)
 
     @field_validator("username")
     @classmethod
@@ -97,11 +103,64 @@ class KycSubmitIn(BaseModel):
 # ---------------------------------------------------------------------------
 # wallet
 # ---------------------------------------------------------------------------
+class BankingMethodIn(BaseModel):
+    """A payment pathway an operator is adding, from the admin panel.
+
+    Note what is NOT here: any credential. `credential_env` carries the *name*
+    of the environment variable holding the secret, and the secret itself is
+    never sent to this API in either direction.
+    """
+
+    name: str = Field(min_length=1, max_length=120)
+    country_code: str = Field(default="*", max_length=8)
+    currency: str = Field(default="*", max_length=8)
+    account_id: str = Field(default="", max_length=120)
+    api_endpoint: str = Field(default="", max_length=255)
+    credential_env: str = Field(default="", max_length=64)
+    provider: str = Field(default="", max_length=32)
+    method: str = Field(default="bank_transfer", max_length=32)
+    deposits_enabled: bool = True
+    withdrawals_enabled: bool = False
+    active: bool = True
+    priority: int = 100
+    min_amount_minor: int = 0
+    max_amount_minor: int = 0
+    fee_bps: int = 0
+    instructions: dict = Field(default_factory=dict)
+    notes: str | None = None
+
+
+class BankingMethodUpdateIn(BaseModel):
+    """A partial edit. Anything omitted keeps its current value."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    country_code: str | None = Field(default=None, max_length=8)
+    currency: str | None = Field(default=None, max_length=8)
+    account_id: str | None = Field(default=None, max_length=120)
+    api_endpoint: str | None = Field(default=None, max_length=255)
+    credential_env: str | None = Field(default=None, max_length=64)
+    provider: str | None = Field(default=None, max_length=32)
+    method: str | None = Field(default=None, max_length=32)
+    deposits_enabled: bool | None = None
+    withdrawals_enabled: bool | None = None
+    active: bool | None = None
+    priority: int | None = None
+    min_amount_minor: int | None = None
+    max_amount_minor: int | None = None
+    fee_bps: int | None = None
+    instructions: dict | None = None
+    notes: str | None = None
+
+
 class DepositIn(BaseModel):
     amount: str
     method: PaymentMethod
     idempotency_key: str | None = Field(default=None, max_length=128)
     bonus_code: str | None = Field(default=None, max_length=32)
+    #: Optional. Omit and the pathway is resolved from the player's country and
+    #: the currency; supply it to force a specific one (the cashier does this
+    #: when the player picks a bank from the list).
+    banking_method_id: str | None = Field(default=None, max_length=32)
 
     @field_validator("method")
     @classmethod
@@ -114,6 +173,7 @@ class WithdrawalIn(BaseModel):
     method: PaymentMethod
     destination: str = Field(min_length=4, max_length=255)
     idempotency_key: str | None = Field(default=None, max_length=128)
+    banking_method_id: str | None = Field(default=None, max_length=32)
 
 
 class SimulateDepositIn(BaseModel):
@@ -174,6 +234,13 @@ class ReviewWithdrawalIn(BaseModel):
     approve: bool
     note: str | None = Field(default=None, max_length=500)
     reason: str | None = Field(default=None, max_length=255)
+
+
+class PayoutConfirmIn(BaseModel):
+    """Evidence that an out-of-band payout actually left the building."""
+
+    reference: str = Field(min_length=3, max_length=128)
+    note: str | None = Field(default=None, max_length=500)
 
 
 class AdminAdjustIn(BaseModel):

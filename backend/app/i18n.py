@@ -235,6 +235,17 @@ def locale_for(country: str | None, accept_language: str | None = None) -> str:
     return settings.default_locale.lower()
 
 
+def locale_for_country(country: str | None) -> dict:
+    """The locale and language to default a new account to, from its region.
+
+    Used at registration so a player starts in their own language and currency
+    rather than in English and dollars. Only a default: anything the player
+    states explicitly overrides it.
+    """
+    locale = locale_for(country)
+    return {"locale": locale, "language": locale.split("-")[0] if locale else None}
+
+
 def currency_for(country: str | None) -> str:
     """The display currency to offer a visitor from this country."""
     code = COUNTRY_CURRENCY.get((country or "").upper(), settings.settlement_currency)

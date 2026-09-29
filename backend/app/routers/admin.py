@@ -44,6 +44,7 @@ from ..schemas import (
     AdminAdjustIn,
     BonusCodeIn,
     BonusCreateIn,
+    PayoutConfirmIn,
     ReviewWithdrawalIn,
     UserAdminUpdateIn,
     money_field,
@@ -563,6 +564,30 @@ def review_withdrawal(
         "status": wd.status.value,
         "provider_ref": wd.provider_ref,
         "reviewed_at": wd.reviewed_at,
+        "paid_at": wd.paid_at,
+    }
+
+
+@router.post("/withdrawals/{withdrawal_id}/mark-paid")
+def mark_withdrawal_paid(
+    withdrawal_id: str, payload: PayoutConfirmIn, admin: AdminUser, db: Db
+):
+    """Confirm a payout that was sent by hand from the rail's own console.
+
+    The counterpart to approving: without it a manually paid withdrawal holds
+    the player's money in `user_locked` indefinitely, because only a terminal
+    state releases the block.
+    """
+    wd = db.get(Withdrawal, withdrawal_id)
+    if wd is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Withdrawal not found.")
+    wd = pay_svc.confirm_payout_paid(
+        db, wd, admin, reference=payload.reference, note=payload.note
+    )
+    return {
+        "id": wd.id,
+        "status": wd.status.value,
+        "provider_ref": wd.provider_ref,
         "paid_at": wd.paid_at,
     }
 

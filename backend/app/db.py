@@ -119,6 +119,10 @@ def session_scope() -> Iterator[Session]:
 #: shape, and README "Database changes" describes the switch.
 COLUMN_PATCHES: tuple[tuple[str, str, str], ...] = (
     ("withdrawals", "payout_ref", "VARCHAR(191)"),
+    ("deposits", "banking_method_id", "VARCHAR(32)"),
+    ("withdrawals", "banking_method_id", "VARCHAR(32)"),
+    ("users", "locale", "VARCHAR(16)"),
+    ("users", "language", "VARCHAR(8)"),
 )
 
 

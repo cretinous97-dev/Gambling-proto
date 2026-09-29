@@ -24,9 +24,11 @@ from starlette.routing import Match
 
 from .config import settings
 from .db import init_db, session_scope
+from sqlalchemy import func
+
 from .models import User, UserRole
 from .payments import provider_status
-from .routers import admin, auth, crash, games, misc, payments, wallet
+from .routers import admin, auth, banking, crash, games, misc, payments, wallet
 from .security import hash_password, signing_key_source
 from .services import crash_loop
 from .services.crash_loop import ops_loop, run_forever
@@ -68,32 +70,83 @@ def frontend_dist() -> Path | None:
 
 
 def seed_admin() -> None:
-    with session_scope() as db:
-        existing = db.query(User).filter(User.email == settings.admin_email.lower()).first()
-        if existing:
-            return
-        from .ledger import ensure_user_accounts
-        from .rng import commit, new_client_seed, new_server_seed
+    """Create the operator account. Idempotent, and never fatal.
 
-        seed = new_server_seed()
-        admin_user = User(
-            email=settings.admin_email.lower(),
-            username="admin",
-            password_hash=hash_password(settings.admin_password),
-            role=UserRole.admin,
-            country="BT",
-            email_verified=True,
-            server_seed=seed,
-            server_seed_hash=commit(seed),
-            client_seed=new_client_seed(),
-        )
-        db.add(admin_user)
-        db.flush()
-        ensure_user_accounts(db, admin_user)
-        log.warning(
-            "Seeded admin account %s. CHANGE THE PASSWORD IMMEDIATELY "
-            "(ADMIN_PASSWORD env var).",
-            settings.admin_email,
+    Keyed on ADMIN_EMAIL, because that is what an operator changes to say "this
+    is the account I sign in with". It has to survive two situations it did not:
+
+    * **Changing ADMIN_EMAIL on an existing deployment.** The old lookup was by
+      email while the username was the hardcoded string "admin". An installation
+      that already had a user called "admin" therefore hit the unique index on
+      `username`, the exception escaped the lifespan hook, and the application
+      refused to start - a boot loop caused purely by configuring a new operator
+      address. The username is now qualified when it is taken.
+
+    * **Not being able to create the account at all.** Whatever goes wrong here,
+      the process must still come up: an operator can fix a bad environment or
+      create an account by hand, but they cannot do either against a server that
+      will not boot. The failure is logged rather than raised.
+
+    The password is bcrypt-hashed before it reaches the database and the
+    plaintext is never stored, logged or returned.
+    """
+    email = settings.admin_email.strip().lower()
+    try:
+        with session_scope() as db:
+            if db.query(User).filter(func.lower(User.email) == email).first():
+                return
+
+            others = db.query(User).filter(User.role == UserRole.admin).count()
+            if others:
+                # Not an error - an operator moving to a new address - but not
+                # something to do quietly either, because it creates a second
+                # administrator account.
+                log.warning(
+                    "ADMIN_EMAIL=%s does not exist yet and %d operator "
+                    "account(s) already do. Creating it. If this was not "
+                    "intended, change the password immediately.",
+                    email,
+                    others,
+                )
+
+            from .ledger import ensure_user_accounts
+            from .rng import commit, new_client_seed, new_server_seed
+
+            # 'admin' is the username an operator expects, so try it first and
+            # only qualify it when it is genuinely taken.
+            username = "admin"
+            if db.query(User).filter(User.username == username).first():
+                username = f"admin_{email.split('@')[0][:16]}"
+
+            seed = new_server_seed()
+            admin_user = User(
+                email=email,
+                username=username,
+                password_hash=hash_password(settings.admin_password),
+                role=UserRole.admin,
+                country=settings.default_country or "BT",
+                email_verified=True,
+                server_seed=seed,
+                server_seed_hash=commit(seed),
+                client_seed=new_client_seed(),
+            )
+            db.add(admin_user)
+            db.flush()
+            ensure_user_accounts(db, admin_user)
+            log.warning(
+                "Seeded operator account %s (username %s). Change the password "
+                "from the back office: it is in ADMIN_PASSWORD, which is "
+                "plaintext wherever that variable lives.",
+                email,
+                username,
+            )
+    except Exception as exc:  # noqa: BLE001 - a seed must not stop the boot
+        log.error(
+            "Could not seed the operator account (%s: %s). The application is "
+            "starting regardless; create an admin account manually if one does "
+            "not already exist.",
+            type(exc).__name__,
+            exc,
         )
 
 
@@ -103,6 +156,23 @@ def seed_admin() -> None:
 # first wins; both are safe to call more than once.
 _bootstrapped = False
 _bootstrap_lock = threading.Lock()
+
+
+def seed_banking_pathways() -> list[str]:
+    """Install the starter payment pathways, once.
+
+    Runs inside the same bootstrap lock as the admin seed. Additive and
+    idempotent by name, so an operator who retires or reconfigures a pathway
+    keeps that decision across every future deploy - seeding must never
+    overwrite an operational choice.
+    """
+    from .services import routing
+
+    with session_scope() as db:
+        added = routing.seed_starter_pathways(db)
+    if added:
+        log.info("payment pathways seeded: %s", ", ".join(added))
+    return added
 
 
 def bootstrap_app() -> None:
@@ -121,6 +191,7 @@ def bootstrap_app() -> None:
 
         ensure_signing_key()
         seed_admin()
+        seed_banking_pathways()
         crash_loop.bootstrap()
         status = provider_status()
         log.info(
@@ -222,6 +293,7 @@ app.include_router(wallet.router)
 app.include_router(games.router)
 app.include_router(crash.router)
 app.include_router(admin.router)
+app.include_router(banking.router)
 app.include_router(misc.router)
 # Provider callbacks are mounted before the SPA catch-all for the same reason
 # every API router is: an unmatched POST must 404 as JSON, never as HTML.

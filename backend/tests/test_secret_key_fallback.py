@@ -56,6 +56,13 @@ def run_child(mode: str, db_path: Path, token: str | None = None) -> dict:
         "CORS_ORIGINS": "*",
         "ADMIN_EMAIL": "admin@example.com",
         "ADMIN_PASSWORD": "Passw0rd!23",
+        # Ignore any developer's `backend/.env`. These children run from
+        # `backend/`, where pydantic-settings would read one - and a local
+        # SECRET_KEY is exactly the value the test is withholding. Without
+        # this, "unset" means "unset unless you happen to have configured it",
+        # and the test silently stops asserting anything on the machines most
+        # likely to run it.
+        "ENV_FILE": os.devnull,
     }
     env.pop("SECRET_KEY", None)           # the whole point
     args = [sys.executable, "-c", CHILD_SCRIPT, mode]
@@ -167,6 +174,9 @@ def boot_in_production(secret_key: str | None) -> dict:
         "PYTHONPATH": str(BACKEND),
         "ENVIRONMENT": "production",       # take the guard out of demo mode
         "DATABASE_URL": "sqlite:////tmp/production-boot-check.db",
+        # Same reason as run_child: `**os.environ` above would otherwise let a
+        # local `backend/.env` supply the very SECRET_KEY this test withholds.
+        "ENV_FILE": os.devnull,
     }
     env.pop("SECRET_KEY", None)
     if secret_key is not None:
@@ -201,6 +211,35 @@ def test_production_refuses_to_boot_without_an_explicit_secret_key():
         "the built-in default are forgeable by anyone who has read this source"
     )
     assert "SECRET_KEY" in outcome["message"]
+
+
+def test_production_refuses_an_empty_secret_key():
+    """The dangerous one, because nothing about it looks wrong.
+
+    `SECRET_KEY=` in a `.env` file - which is what a commented-out example
+    line becomes when someone uncomments it - sets the variable to the empty
+    string. It is present. It is not the built-in default. Everything boots,
+    and every session token is signed with nothing at all, so anyone who has
+    read this source can mint a token for any account.
+
+    The guard used to test only for the literal default, so this sailed
+    through. It is now a refusal, like an unset variable.
+    """
+    outcome = boot_in_production(secret_key="")
+
+    assert outcome["refused"], (
+        "production booted with an EMPTY SECRET_KEY - sessions signed with an "
+        "empty key are forgeable by anyone"
+    )
+    assert "SECRET_KEY" in outcome["message"]
+
+
+def test_production_refuses_a_key_short_enough_to_brute_force():
+    """HS256 signs with the key directly; a short one falls offline."""
+    outcome = boot_in_production(secret_key="hunter2")
+
+    assert outcome["refused"], "a 7-character signing key was accepted in production"
+    assert "short" in outcome["message"].lower() or "characters" in outcome["message"]
 
 
 def test_production_boots_with_an_explicit_secret_key():

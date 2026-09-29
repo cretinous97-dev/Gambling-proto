@@ -12,9 +12,33 @@
 --   2. run this file once, or let Alembic manage the same shape going forward
 --   3. never let the application role own the schema in production
 --
--- Money columns are BIGINT minor units (cents) - never floating point. The
--- ledger is the source of truth; `balances` is a materialised cache of it, and
--- `ledger_entries` sums to zero per transaction by construction.
+-- MONEY MODEL (read this before changing any amount column)
+--
+-- Money is stored as BIGINT *minor units* - integer cents, integer ngultrum,
+-- integer yen. Never floating point, and deliberately not NUMERIC either:
+--
+--   * every card scheme and wallet API in existence (Adyen, Stripe, mBoB)
+--     takes and returns integer minor units, so integer storage means an amount
+--     is never re-rounded on the way to the processor;
+--   * the ledger invariant is that `ledger_entries` sums to exactly zero per
+--     transaction. With integers that is an exact equality; with a decimal
+--     type it is a comparison you have to get the scale right on, in every
+--     query, forever;
+--   * addition and subtraction of integers cannot lose a unit. There is no
+--     rounding mode to argue about, because there is no rounding.
+--
+-- For reporting, BI and anything that would rather read a decimal, the
+-- NUMERIC views at the end of this file (`wallets`, `transactions`) divide by
+-- 100 with NUMERIC arithmetic, which is exact. They are read-only: nothing
+-- writes through them. So the storage stays exact and integer, and every
+-- decimal figure an analyst or an auditor sees is exact too.
+--
+-- Naming: the tables an operator asked for are all here. Users is `users`;
+-- Wallets is `balances` (the live balance, a cache of the ledger) backed by
+-- `ledger_entries` (the record); Transactions is `ledger_transactions` plus
+-- `ledger_entries`; and the custom banks added in the admin panel are
+-- `banking_methods`. The `wallets` and `transactions` views expose the first
+-- three under those names.
 
 CREATE TYPE accountkind AS ENUM ('user_available', 'user_bonus', 'user_locked', 'house_revenue', 'bonus_pool', 'payment_clearing', 'rakeback_pool', 'chargeback_loss', 'fee_income');
 
@@ -62,6 +86,32 @@ CREATE TABLE balances (
 	updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
 	CONSTRAINT uq_balance_user_kind UNIQUE (user_id, kind)
+);
+
+CREATE TABLE banking_methods (
+	id VARCHAR(32) NOT NULL, 
+	name VARCHAR(120) NOT NULL, 
+	country_code VARCHAR(2) NOT NULL, 
+	currency VARCHAR(3) NOT NULL, 
+	account_id VARCHAR(120) NOT NULL, 
+	api_endpoint VARCHAR(255) NOT NULL, 
+	credential_env VARCHAR(64) NOT NULL, 
+	provider VARCHAR(32) NOT NULL, 
+	method paymentmethod NOT NULL, 
+	deposits_enabled BOOLEAN NOT NULL, 
+	withdrawals_enabled BOOLEAN NOT NULL, 
+	active BOOLEAN NOT NULL, 
+	priority INTEGER NOT NULL, 
+	min_amount_minor BIGINT NOT NULL, 
+	max_amount_minor BIGINT NOT NULL, 
+	fee_bps INTEGER NOT NULL, 
+	instructions JSON NOT NULL, 
+	notes TEXT, 
+	created_by VARCHAR(32), 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	updated_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	CONSTRAINT uq_banking_method UNIQUE (name, country_code, currency)
 );
 
 CREATE TABLE bets (
@@ -139,6 +189,7 @@ CREATE TABLE deposits (
 	currency VARCHAR(3) NOT NULL, 
 	method paymentmethod NOT NULL, 
 	provider VARCHAR(32) NOT NULL, 
+	banking_method_id VARCHAR(32), 
 	provider_ref VARCHAR(128), 
 	status depositstatus NOT NULL, 
 	idempotency_key VARCHAR(128), 
@@ -288,6 +339,8 @@ CREATE TABLE users (
 	password_hash VARCHAR(255) NOT NULL, 
 	role userrole NOT NULL, 
 	display_currency VARCHAR(3) NOT NULL, 
+	locale VARCHAR(16), 
+	language VARCHAR(8), 
 	country VARCHAR(2) NOT NULL, 
 	date_of_birth TIMESTAMP WITH TIME ZONE, 
 	phone VARCHAR(32), 
@@ -323,6 +376,7 @@ CREATE TABLE withdrawals (
 	method paymentmethod NOT NULL, 
 	destination VARCHAR(255) NOT NULL, 
 	provider VARCHAR(32) NOT NULL, 
+	banking_method_id VARCHAR(32), 
 	provider_ref VARCHAR(128), 
 	payout_ref VARCHAR(191), 
 	status withdrawalstatus NOT NULL, 
@@ -346,6 +400,12 @@ CREATE INDEX ix_balances_kind ON balances (kind);
 
 CREATE INDEX ix_balances_user_id ON balances (user_id);
 
+CREATE INDEX ix_banking_methods_active ON banking_methods (active);
+
+CREATE INDEX ix_banking_methods_country_code ON banking_methods (country_code);
+
+CREATE INDEX ix_banking_methods_currency ON banking_methods (currency);
+
 CREATE INDEX ix_bets_created_at ON bets (created_at);
 
 CREATE INDEX ix_bets_game ON bets (game);
@@ -363,6 +423,8 @@ CREATE INDEX ix_bonus_grants_user_id ON bonus_grants (user_id);
 CREATE INDEX ix_chat_messages_created_at ON chat_messages (created_at);
 
 CREATE INDEX ix_chat_messages_user_id ON chat_messages (user_id);
+
+CREATE INDEX ix_deposits_banking_method_id ON deposits (banking_method_id);
 
 CREATE INDEX ix_deposits_provider_ref ON deposits (provider_ref);
 
@@ -406,6 +468,8 @@ CREATE INDEX ix_refresh_tokens_user_id ON refresh_tokens (user_id);
 
 CREATE INDEX ix_session_audit_user_id ON session_audit (user_id);
 
+CREATE INDEX ix_withdrawals_banking_method_id ON withdrawals (banking_method_id);
+
 CREATE INDEX ix_withdrawals_provider_ref ON withdrawals (provider_ref);
 
 CREATE INDEX ix_withdrawals_status ON withdrawals (status);
@@ -419,3 +483,30 @@ CREATE UNIQUE INDEX ix_refresh_tokens_token_hash ON refresh_tokens (token_hash);
 CREATE UNIQUE INDEX ix_users_email ON users (email);
 
 CREATE UNIQUE INDEX ix_users_username ON users (username);
+
+CREATE VIEW wallets AS
+SELECT
+    b.id                                                    AS wallet_id,
+    b.user_id,
+    b.kind                                                  AS account_kind,
+    (b.amount::numeric(20, 2) / 100)                        AS balance,
+    (b.locked::numeric(20, 2) / 100)                        AS locked,
+    ((b.amount - b.locked)::numeric(20, 2) / 100)           AS available,
+    'USD'                                 AS settlement_currency,
+    b.updated_at
+FROM balances b;
+
+CREATE VIEW transactions AS
+SELECT
+    t.id                                        AS transaction_id,
+    t.type                                      AS transaction_type,
+    t.status,
+    t.user_id,
+    t.reference,
+    t.memo,
+    e.kind                                      AS account_kind,
+    (e.amount::numeric(20, 2) / 100)            AS amount,
+    (e.balance_after::numeric(20, 2) / 100)     AS balance_after,
+    t.created_at
+FROM ledger_transactions t
+JOIN ledger_entries e ON e.transaction_id = t.id;

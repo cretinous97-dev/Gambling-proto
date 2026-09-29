@@ -137,7 +137,14 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.player)
 
+    #: What the player *reads* money in. Set from their country at signup and
+    #: theirs to change; it never decides which rail a payment takes.
     display_currency: Mapped[str] = mapped_column(String(3), default="USD")
+    #: What the player *reads* the interface in - a BCP-47 tag (`pt-BR`) and its
+    #: base language (`pt`). Both stored because a browser needs the tag for
+    #: date and number formatting and the catalogue is keyed by language.
+    locale: Mapped[str | None] = mapped_column(String(16))
+    language: Mapped[str | None] = mapped_column(String(8))
     country: Mapped[str] = mapped_column(String(2), default="BT")
     date_of_birth: Mapped[datetime | None] = mapped_column(UTCDateTime)
     phone: Mapped[str | None] = mapped_column(String(32))
@@ -284,6 +291,98 @@ Index("ix_ledger_entries_user_kind", LedgerEntry.user_id, LedgerEntry.kind)
 # ---------------------------------------------------------------------------
 # payments
 # ---------------------------------------------------------------------------
+class BankingMethod(Base):
+    """A payment pathway, defined as data rather than as code.
+
+    Which bank, wallet or card scheme a player in a given country can use is a
+    commercial decision that changes per market, per contract and per month. It
+    does not belong in a router, a provider adapter or a deploy. This table is
+    that decision, and the admin panel is how it is edited.
+
+    Two columns carry `'*'` as a wildcard: ``country_code`` and ``currency``.
+    A row matching every country at priority 100 is the fallback that catches
+    a player in a market nobody has configured yet; a specific row at priority
+    10 wins for that market. Resolution is ``ORDER BY priority, id`` so the
+    outcome is stable and explainable rather than "whichever row came back
+    first" - an operator debugging "why did this player get that bank" needs a
+    deterministic answer.
+
+    What is deliberately NOT stored here: credentials. ``credential_env`` holds
+    the *name* of the environment variable that carries the secret, never the
+    secret itself. A payments table is read by every admin session, exported by
+    every reporting query and copied into every staging database; a key stored
+    here would leak through all three without anyone doing anything wrong. The
+    name is enough for the adapter to find the value at call time.
+
+    ``api_endpoint`` is the institution's URL, kept per row because a local
+    rail (a Bhutanese wallet, a regional bank) and a global acquirer do not
+    share one. It is validated to be https in production - a deposit endpoint
+    reached over plain http discloses the amount, the account and the session.
+    """
+
+    __tablename__ = "banking_methods"
+    __table_args__ = (
+        UniqueConstraint("name", "country_code", "currency", name="uq_banking_method"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+
+    #: What the player sees, and what staff call it on the phone ("Bank of
+    #: Bhutan mBoB"), not the internal product code.
+    name: Mapped[str] = mapped_column(String(120))
+    #: ISO-3166 alpha-2, or '*' for every country.
+    country_code: Mapped[str] = mapped_column(String(2), default="*", index=True)
+    #: ISO-4217, or '*' for every currency.
+    currency: Mapped[str] = mapped_column(String(3), default="*", index=True)
+
+    #: Merchant / account / biller id at the institution (the "who is being
+    #: paid" half of the request). Not a secret: it appears on the player's own
+    #: statement and is the same number in test and live.
+    account_id: Mapped[str] = mapped_column(String(120), default="")
+    #: Base URL for this pathway's API. Empty means "use the adapter default".
+    api_endpoint: Mapped[str] = mapped_column(String(255), default="")
+    #: NAME of the env var holding this pathway's credential - never the value.
+    credential_env: Mapped[str] = mapped_column(String(64), default="")
+
+    #: Which adapter speaks to it: adyen, stripe, cryptopay, bank_transfer,
+    #: ewallet, sandbox. Must be a registered provider - validated on write so
+    #: a typo cannot be saved and then silently fail on a real deposit.
+    provider: Mapped[str] = mapped_column(String(32), default="bank_transfer")
+    #: The player-facing product family, for grouping in the cashier.
+    method: Mapped[PaymentMethod] = mapped_column(
+        Enum(PaymentMethod), default=PaymentMethod.bank_transfer
+    )
+
+    deposits_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    withdrawals_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: The master switch. Deactivating never deletes: a settled deposit points
+    #: at this row forever, and history must not develop holes.
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    #: Lower wins. Ties break on id so routing is never arbitrary.
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+
+    #: Per-transaction bounds in minor units. 0 means "no bound from this row";
+    #: the global config limits still apply on top.
+    min_amount_minor: Mapped[int] = mapped_column(BigInteger, default=0)
+    max_amount_minor: Mapped[int] = mapped_column(BigInteger, default=0)
+    #: Fee in basis points (25 = 0.25%). Integer, like every other rate here.
+    fee_bps: Mapped[int] = mapped_column(Integer, default=0)
+
+    #: Player-facing next steps when this rail is chosen out-of-band: the bank
+    #: account to transfer to, the wallet handle to send to, the reference
+    #: format. Shown verbatim, so it must never contain a credential.
+    instructions: Mapped[dict] = mapped_column(JSON, default=dict)
+    #: Free text for staff: contract, contact, why it was switched off.
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    created_by: Mapped[str | None] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime, default=utcnow, onupdate=utcnow
+    )
+
+
 class Deposit(Base):
     __tablename__ = "deposits"
 
@@ -296,6 +395,11 @@ class Deposit(Base):
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     method: Mapped[PaymentMethod] = mapped_column(Enum(PaymentMethod))
     provider: Mapped[str] = mapped_column(String(32), default="sandbox")
+    #: The banking_methods row this was routed through, resolved at creation.
+    #: Stored rather than re-derived: routing rules change, and reconciliation
+    #: needs to know which account the money actually went to, not which row
+    #: would win today.
+    banking_method_id: Mapped[str | None] = mapped_column(String(32), index=True)
     provider_ref: Mapped[str | None] = mapped_column(String(128), index=True)
     status: Mapped[DepositStatus] = mapped_column(
         Enum(DepositStatus), default=DepositStatus.pending, index=True
@@ -326,6 +430,9 @@ class Withdrawal(Base):
     method: Mapped[PaymentMethod] = mapped_column(Enum(PaymentMethod))
     destination: Mapped[str] = mapped_column(String(255))   # masked wallet/IBAN
     provider: Mapped[str] = mapped_column(String(32), default="sandbox")
+    #: The banking_methods row chosen for the payout. The reviewer sees it, and
+    #: it is what reconciles against the institution's statement.
+    banking_method_id: Mapped[str | None] = mapped_column(String(32), index=True)
     provider_ref: Mapped[str | None] = mapped_column(String(128), index=True)
     # The provider's *payout instrument* id (Adyen transferInstrumentId, Stripe
     # connected-account bank account token...). `destination` above is the

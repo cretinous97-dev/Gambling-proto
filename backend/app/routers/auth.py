@@ -117,6 +117,19 @@ def register(payload: RegisterIn, request: Request, db: Db):
         )
 
     server_seed = new_server_seed()
+    # Localise the account from the region it was opened in, so a player in
+    # Bhutan reads ngultrum and a player in Germany reads euro from their first
+    # page rather than being defaulted to dollars and having to find a setting.
+    # An explicit choice in the payload always wins: this is a default, not a
+    # decision made on the player's behalf.
+    region = i18n.locale_for_country(declared)
+    chosen_locale = (payload.locale or "").strip() or region.get("locale")
+    chosen_language = (
+        (payload.language or "").strip()
+        or (chosen_locale.split("-")[0] if chosen_locale else None)
+        or region.get("language")
+    )
+
     user = User(
         email=email,
         username=payload.username,
@@ -124,6 +137,13 @@ def register(payload: RegisterIn, request: Request, db: Db):
         country=payload.country.upper(),
         date_of_birth=payload.date_of_birth,
         phone=payload.phone,
+        language=chosen_language,
+        locale=chosen_locale,
+        display_currency=(
+            (payload.display_currency or "").strip().upper()
+            or i18n.currency_for(declared)
+            or settings.settlement_currency
+        ),
         server_seed=server_seed,
         server_seed_hash=commit(server_seed),
         client_seed=new_client_seed(),

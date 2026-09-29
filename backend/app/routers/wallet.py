@@ -21,7 +21,7 @@ from ..models import (
     WithdrawalStatus,
 )
 from ..money import to_minor
-from ..payments import get_provider, provider_status
+from ..payments import get_provider, get_provider_by_name, provider_status
 from ..schemas import DepositIn, SimulateDepositIn, WithdrawalIn, money_field
 from ..security import CurrentUser, Db, audit
 from ..services import payments as pay_svc
@@ -127,10 +127,16 @@ def create_deposit(payload: DepositIn, user: CurrentUser, db: Db, request: Reque
         method=payload.method,
         idempotency_key=payload.idempotency_key,
         bonus_code=payload.bonus_code,
+        banking_method_id=payload.banking_method_id,
     )
     audit(
         db, user.id, "deposit.create", request,
-        {"deposit_id": deposit.id, "amount": amount, "method": payload.method.value},
+        {
+            "deposit_id": deposit.id,
+            "amount": amount,
+            "method": payload.method.value,
+            "banking_method_id": deposit.banking_method_id,
+        },
     )
     return pay_svc.deposit_intent_payload(deposit)
 
@@ -158,14 +164,20 @@ def simulate_deposit(
 ):
     """SANDBOX ONLY. Stands in for the customer completing (or failing) the
     payment on the provider's page or for an on-chain confirmation."""
-    provider = get_provider()
+    deposit = _own_deposit(db, user, deposit_id)
+
+    # Gate on the provider that carries *this deposit*, not on the deployment's
+    # default one. With per-pathway routing those are different things: once a
+    # deployment settles through a real rail (bank_transfer, adyen) while its
+    # default is still `sandbox`, checking the default would hand every player a
+    # button that credits a real-rail deposit for free.
+    provider = get_provider_by_name(deposit.provider)
     if not provider.supports_simulation:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Simulation is disabled: the active payment provider is live. "
-            "Complete the payment with the provider instead.",
+            "Simulation is disabled: this payment is being settled by a live "
+            "provider. Complete the payment with the provider instead.",
         )
-    deposit = _own_deposit(db, user, deposit_id)
     mapped = {
         "succeed": DepositStatus.succeeded,
         "fail": DepositStatus.failed,
@@ -242,9 +254,11 @@ def create_withdrawal(payload: WithdrawalIn, user: CurrentUser, db: Db, request:
         method=payload.method,
         destination=payload.destination,
         idempotency_key=payload.idempotency_key,
+        banking_method_id=payload.banking_method_id,
     )
     audit(db, user.id, "withdrawal.request", request,
-          {"withdrawal_id": wd.id, "amount": amount, "method": payload.method.value})
+          {"withdrawal_id": wd.id, "amount": amount, "method": payload.method.value,
+           "banking_method_id": wd.banking_method_id})
     return _withdrawal_out(wd)
 
 
