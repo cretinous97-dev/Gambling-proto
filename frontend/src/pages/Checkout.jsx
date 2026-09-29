@@ -69,6 +69,11 @@ export default function Checkout() {
   if (!deposit) return <div className="page narrow"><Loading /></div>
 
   const done = deposit.status === 'succeeded'
+  // A live PSP hosts its own payment page (Adyen's /sessions returns one, so
+  // does Stripe Checkout). Without this redirect the deposit would sit at
+  // requires_action forever and the player would never see a card form - the
+  // exact "nothing happens when I press Deposit" failure.
+  const redirectUrl = deposit.instructions?.redirect_url || null
 
   return (
     <div className="page narrow">
@@ -91,6 +96,13 @@ export default function Checkout() {
         </div>
 
         <hr style={{ border: 0, borderTop: '1px solid var(--line)', margin: '16px 0' }} />
+
+        {redirectUrl && !done && (
+          <div className="alert alert-info">
+            <div className="small" style={{ marginBottom: 8 }}>{t('checkout.redirect_note')}</div>
+            <a className="btn btn-primary" href={redirectUrl}>{t('checkout.continue_to_payment')}</a>
+          </div>
+        )}
 
         {deposit.instructions?.address && (
           <div className="alert alert-info">

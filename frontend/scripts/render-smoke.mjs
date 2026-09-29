@@ -121,6 +121,10 @@ function routeFor(url) {
   if (path === '/api/auth/kyc') return { status: 'none', documents: [] }
   if (path === '/api/games/history') return BETS
   if (path === '/api/wallet/deposits/dep_1') return DEPOSIT
+  // The same deposit as a live provider would return it: hosted payment page.
+  if (path === '/api/wallet/deposits/dep_live') {
+    return { ...DEPOSIT, id: 'dep_live', instructions: { ...DEPOSIT.instructions, redirect_url: 'https://checkoutshopper-test.adyen.com/pay/xyz' } }
+  }
   // A bare array, matching the API: /auth/notifications returns a list, not an
   // envelope. Getting this wrong is how the account page white-screens.
   if (path === '/api/auth/notifications') return []
@@ -307,6 +311,21 @@ for (const page of ES_PAGES) {
   } catch (err) {
     check(`${page.url} renders`, false, String(err).slice(0, 200))
   }
+}
+
+// --- the redirect to a live payment page ------------------------------------
+// With a real PSP the deposit completes on the provider's page. If the client
+// never offers that link the deposit stays at requires_action forever, which
+// looks exactly like a broken deposit button.
+console.log('\n  — hosted payment page (live provider) —')
+try {
+  const liveWindow = await boot('http://localhost/en/checkout/dep_live')
+  const liveText = liveWindow.document.getElementById('root')?.textContent || ''
+  const link = liveWindow.document.querySelector('a[href^="https://checkoutshopper-test.adyen.com"]')
+  check('the provider page is linked', Boolean(link))
+  check('the player is told what happens next', liveText.includes('Continue to payment'))
+} catch (err) {
+  check('the hosted payment page renders', false, String(err).slice(0, 200))
 }
 
 console.log(`\nfinal: ${passed} passed, ${failures.length} failed`)
