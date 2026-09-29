@@ -52,7 +52,7 @@ function Dashboard({ onError }) {
   const [revenue, setRevenue] = useState([])
 
   useEffect(() => {
-    ;(async () => {
+    (async () => {
       try {
         const [d, r] = await Promise.all([api.adminDashboard(), api.adminRevenue(14)])
         setData(d)
@@ -247,7 +247,7 @@ function Deposits({ onError }) {
   const [filter, setFilter] = useState('')
 
   useEffect(() => {
-    ;(async () => {
+    (async () => {
       try {
         const res = await api.adminDeposits(filter || undefined)
         setRows(res.deposits)
@@ -607,7 +607,7 @@ function Risk() {
   const [wins, setWins] = useState([])
 
   useEffect(() => {
-    ;(async () => {
+    (async () => {
       const [q, w] = await Promise.all([api.adminAml(), api.adminBigWins()])
       setQueue(q.queue)
       setWins(w.wins)
@@ -742,7 +742,7 @@ function System({ onError }) {
   const [sessions, setSessions] = useState([])
 
   useEffect(() => {
-    ;(async () => {
+    (async () => {
       try {
         const [h, w, s] = await Promise.all([api.adminHealth(), api.adminWebhooks(), api.adminSessions()])
         setHealth(h)

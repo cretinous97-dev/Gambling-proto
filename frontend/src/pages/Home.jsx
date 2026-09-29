@@ -18,7 +18,7 @@ export default function Home() {
   const { toast, isAuthed } = useStore()
 
   useEffect(() => {
-    ;(async () => {
+    (async () => {
       try {
         const [cat, jp, lb, pr, ch] = await Promise.all([
           api.catalog(), api.jackpot(), api.leaderboard(), api.promotions(), api.chat(),

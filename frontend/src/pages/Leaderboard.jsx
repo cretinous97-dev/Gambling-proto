@@ -8,7 +8,7 @@ export default function Leaderboard() {
   const [rounds, setRounds] = useState([])
 
   useEffect(() => {
-    ;(async () => {
+    (async () => {
       const [lb, hist] = await Promise.all([api.leaderboard(), api.crashHistory()])
       setData(lb)
       setRounds(hist.rounds || [])
