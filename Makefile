@@ -26,10 +26,8 @@ api: ## run the API on :$(PORT) (reloads on save)
 web: ## run the frontend dev server on :$(WEB_PORT)
 	cd frontend && npm run dev -- --port $(WEB_PORT)
 
-build: ## production build, copied into the function bundle as the deploy does
-	cd frontend && npm run build \
-		&& rm -rf ../backend/static && mkdir -p ../backend/static \
-		&& cp -R dist/. ../backend/static/
+build: ## production build, placed exactly where the deploy puts it
+	bash frontend/scripts/deploy-build.sh
 
 test: ## run the whole backend test suite
 	cd backend && PYTHONPATH=. ../$(PY) -m pytest tests/ -q

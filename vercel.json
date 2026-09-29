@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd frontend && npm run build && rm -rf ../backend/static && mkdir -p ../backend/static && cp -R dist/. ../backend/static/",
+  "buildCommand": "bash frontend/scripts/deploy-build.sh",
   "installCommand": "cd frontend && npm ci",
   "framework": null,
   "functions": {
@@ -96,5 +96,6 @@
         }
       ]
     }
-  ]
+  ],
+  "outputDirectory": "public"
 }

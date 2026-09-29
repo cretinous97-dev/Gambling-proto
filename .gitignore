@@ -26,8 +26,9 @@ backend/data/
 # --- node / frontend build output ----------------------------------------
 node_modules/
 dist/
-#: where the deploy build copies the built site into the function bundle
-backend/static/
+#: where the deploy build copies the built site (see frontend/scripts/deploy-build.sh)
+/backend/static/
+/public/
 .vite/
 npm-debug.log*
 yarn-error.log*

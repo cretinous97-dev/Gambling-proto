@@ -74,7 +74,8 @@ def test_serverless_runtime_dependencies_are_declared():
 def test_vercel_json_is_valid_and_complete():
     config = json.loads(VERCEL_JSON.read_text())
 
-    assert "npm run build" in config["buildCommand"]
+    # the build itself lives in the shared script; see the build tests below
+    assert config["buildCommand"].endswith("deploy-build.sh")
     assert config["installCommand"].startswith("cd frontend")
 
     # Framework detection is disabled on purpose: the repository is not a
@@ -215,21 +216,58 @@ def test_function_include_files_is_a_single_string():
     assert "backend" in include, "the function must be bundled with the application"
 
 
-def test_the_build_puts_the_site_inside_the_function_bundle():
-    """One includeFiles pattern has to cover both the app and the site, so the
-    build copies the built site into backend/static."""
+BUILD_SCRIPT = ROOT / "frontend" / "scripts" / "deploy-build.sh"
+
+
+def test_the_build_produces_every_directory_that_may_be_expected():
+    """The build must write to every location a consumer looks in.
+
+    Vercel's build source decides the static output with:
+
+        usedOutputDirectory = outputDirectory || "public"
+
+    so an unset output directory means `public/`, and a project setting in the
+    dashboard overrides vercel.json. The deployment failed with
+
+        No Output Directory named "public" found after the Build completed
+
+    because the build produced only frontend/dist. Producing all three removes
+    the dependency on which setting wins.
+    """
     config = json.loads(VERCEL_JSON.read_text())
-    build = config["buildCommand"]
-    assert "npm run build" in build
-    assert "backend/static" in build, (
-        "the build no longer copies the site into backend/static, so the "
-        "function bundle would not contain it"
+    script = BUILD_SCRIPT.read_text()
+
+    assert BUILD_SCRIPT.is_file(), "the shared build script is missing"
+    assert config["buildCommand"].endswith("deploy-build.sh"), (
+        "vercel.json must call the shared build script, so the deploy build and "
+        "the local build cannot drift apart"
     )
 
-    source = (ROOT / "backend" / "app" / "main.py").read_text()
-    assert '"static"' in source, (
-        "the dist resolver does not look in backend/static, so a deployment "
-        "would not find the bundled site"
+    configured = config.get("outputDirectory")
+    assert configured, (
+        "outputDirectory should be named explicitly rather than left to the "
+        "platform default"
+    )
+
+    # the configured directory, the platform default, and the function bundle
+    for needed in {configured, "public", "backend/static"}:
+        assert needed in script, (
+            f"the build script never creates {needed!r}; a deployment expecting "
+            f"that directory would fail after a successful build"
+        )
+    assert "index.html" in script, (
+        "the script should verify the build actually produced index.html"
+    )
+
+
+def test_local_and_deploy_builds_are_the_same_script():
+    """Two build definitions drifting apart caused a deployment failure."""
+    makefile = (ROOT / "Makefile").read_text()
+    assert "deploy-build.sh" in makefile, (
+        "make build must call the same script the deployment calls"
+    )
+    assert "npm run build" not in makefile, (
+        "the Makefile builds independently again - it will drift from the deploy"
     )
 
 
@@ -287,13 +325,12 @@ def test_the_config_is_only_as_large_as_it_needs_to_be():
     assert len(raw) < 20_000, f"vercel.json is {len(raw)} bytes"
 
 
-def test_the_config_does_not_force_an_output_directory():
-    """An output directory that does not exist fails the build, and declaring
-    one is no longer needed now that the function serves the site."""
-    config = json.loads(VERCEL_JSON.read_text())
-    assert "outputDirectory" not in config, (
-        "outputDirectory makes the build fail when the platform's root "
-        "directory differs from the repository layout"
+def test_the_site_resolver_finds_the_bundled_location():
+    """The function serves the site, so it must look where the build put it."""
+    source = (ROOT / "backend" / "app" / "main.py").read_text()
+    assert '"static"' in source, (
+        "the dist resolver does not look in backend/static, so a deployment "
+        "would not find the bundled site"
     )
 
 
