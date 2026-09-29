@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -37,6 +38,28 @@ logging.basicConfig(
 log = logging.getLogger("app")
 
 FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+
+
+def frontend_dist() -> Path | None:
+    """Locate the built single-page app, or return None if it is not there.
+
+    Resolved lazily and across several candidate locations, because a
+    serverless bundle, a local uvicorn run and a container image each place the
+    files somewhere different relative to the working directory.
+    """
+    candidates = []
+    override = os.getenv("FRONTEND_DIST")
+    if override:
+        candidates.append(Path(override))
+    candidates += [
+        Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+        Path.cwd() / "frontend" / "dist",
+        Path.cwd() / "dist",
+    ]
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
 
 
 def seed_admin() -> None:
@@ -219,7 +242,91 @@ def health():
 
 
 # ---------------------------------------------------------------------------
-# SPA hosting: only active once `npm run build` has produced frontend/dist.
+# Serving the site from the API process
+# ---------------------------------------------------------------------------
+# A static single-page app on Vercel depends on three separate things lining up:
+# the output directory, the SPA rewrite, and the project's root directory. When
+# any one of them is wrong, the root URL returns the platform's own 404 and the
+# whole deployment looks broken even though the API is fine.
+#
+# These routes remove that dependency. The built app is bundled into the
+# function and the rewrites in vercel.json send every non-API path here, so the
+# site is served by the same process as the API, wherever the platform decides
+# to put the files.
+
+_MISSING_BUNDLE_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Frontend bundle not found</title>
+<style>
+ body{background:#0a0d16;color:#eef2ff;font:16px/1.7 system-ui,sans-serif;
+      max-width:760px;margin:60px auto;padding:0 20px}
+ code{background:#151c30;padding:2px 6px;border-radius:6px;color:#ffcc4d;
+      word-break:break-all}
+ h1{font-size:22px} .ok{color:#35d07f}
+</style></head><body>
+<h1>API is running &mdash; the frontend bundle was not found</h1>
+<p class="ok">Every API endpoint is working. Browse them at <a href="/docs">/docs</a>.</p>
+<p>This page is served by the API process, which could not find a built
+single-page app. So the build step either did not run, or its output was not
+bundled into this function.</p>
+<p>Looked in:<br><code>%s</code></p>
+<p>Fix: confirm the build runs (<code>cd frontend &amp;&amp; npm run build</code>)
+and that <code>frontend/dist/**</code> is in the function's
+<code>includeFiles</code> in <code>vercel.json</code>.</p>
+</body></html>
+"""
+
+
+def _cache_header_for(relative: str) -> str:
+    # Vite hashes asset filenames, so they can be cached indefinitely.
+    if relative.startswith("assets/"):
+        return "public, max-age=31536000, immutable"
+    if Path(relative).suffix.lower() in (".webp", ".png", ".jpg", ".jpeg", ".svg", ".ico"):
+        return "public, max-age=86400"
+    return "no-store"
+
+
+@app.get("/api/site", include_in_schema=False)
+@app.get("/api/site/{asset_path:path}", include_in_schema=False)
+async def site(asset_path: str = ""):
+    """Serve the single-page app.
+
+    A real file when the path names one, otherwise index.html, so that a deep
+    link or a page refresh works with client-side routing.
+    """
+    dist = frontend_dist()
+    if dist is None:
+        tried = ", ".join(
+            str(p) for p in (
+                os.getenv("FRONTEND_DIST"),
+                Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
+                Path.cwd() / "frontend" / "dist",
+                Path.cwd() / "dist",
+            ) if p
+        )
+        return HTMLResponse(_MISSING_BUNDLE_PAGE % tried, status_code=503)
+
+    relative = asset_path.lstrip("/")
+    if relative:
+        candidate = (dist / relative).resolve()
+        root = dist.resolve()
+        # never serve anything outside the bundle
+        if candidate.is_relative_to(root) and candidate.is_file():
+            return FileResponse(
+                candidate, headers={"Cache-Control": _cache_header_for(relative)}
+            )
+        # A missing *file* is a 404. A missing *route* falls through to the app.
+        if Path(relative).suffix:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Not found: /{relative}")
+
+    return FileResponse(dist / "index.html", headers={"Cache-Control": "no-store"})
+
+
+# ---------------------------------------------------------------------------
+# SPA hosting for a normal server: active once `npm run build` has produced
+# frontend/dist. Serverless deployments use the /api/site routes above, which
+# do not depend on the platform's static file configuration.
 # ---------------------------------------------------------------------------
 if FRONTEND_DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")

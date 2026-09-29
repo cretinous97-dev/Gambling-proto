@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import os
 import sys
 import time
@@ -225,8 +226,135 @@ async def main() -> None:
 
 asyncio.run(main())
 
-print(f"\ntotal: {len(PASSED)} passed, {len(FAILED)} failed")
+
+# ---------------------------------------------------------------------------
+# 7. the websocket branch, exercised with a client that can handshake
+# ---------------------------------------------------------------------------
+from starlette.testclient import TestClient  # noqa: E402
+
+print("\n7. the websocket is refused with an explanation")
+
+
+def websocket_section() -> None:
+    with TestClient(asgi_app) as client:
+        with client.websocket_connect("/api/crash/ws") as ws:
+            frame = ws.receive_json()
+            check("the socket explains that it is unavailable",
+                  frame.get("type") == "crash.error", str(frame)[:110])
+            check("the message points the client at the REST endpoint",
+                  "/api/crash/state" in frame.get("detail", ""))
+
+
+websocket_section()
+
+
+# ---------------------------------------------------------------------------
+# 8. Vercel's routing table, simulated end to end
+# ---------------------------------------------------------------------------
+# The deployment returned the platform's 404 at "/" while the API was fine,
+# because the site depended on platform-level static hosting. This section reads
+# the real vercel.json, applies its rewrites the way Vercel does, and dispatches
+# the result through the real entry point - so that exact failure is
+# reproducible locally and cannot reach a deployment again.
+import re  # noqa: E402
+
+VERCEL_JSON = ROOT / "vercel.json"
+
+
+def rule_to_regex(source: str) -> re.Pattern:
+    """Translate a Vercel `source` pattern into a matcher.
+
+    Only the two forms this project uses are supported, deliberately: an exact
+    path, and a trailing `(.*)` capture. Anything cleverer - lookaheads, custom
+    groups - is refused by tests/test_deploy_config.py, because those are
+    precisely the patterns whose platform semantics are easy to get wrong.
+    """
+    return re.compile("^" + re.escape(source).replace(r"\(\.\*\)", "(.*)") + "$")
+
+
+def resolve(path: str, rules: list[dict]) -> tuple[str, str | None]:
+    """Apply rewrites in order, first match wins, exactly like Vercel."""
+    for rule in rules:
+        match = rule_to_regex(rule["source"]).match(path)
+        if match:
+            destination = rule["destination"]
+            for index, group in enumerate(match.groups(), start=1):
+                destination = destination.replace(f"${index}", group or "")
+            return destination, rule["source"]
+    return path, None
+
+
+async def _fetch(final_path: str) -> tuple[int, str, str]:
+    transport = httpx.ASGITransport(app=asgi_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+        r = await c.get(final_path)
+        return r.status_code, r.headers.get("content-type", ""), r.text[:80]
+
+
+def vercel_routing_section() -> None:
+    config = json.loads(VERCEL_JSON.read_text())
+    rules = config.get("rewrites", [])
+    print("\n8. every URL the browser uses, resolved through vercel.json")
+
+    def check_url(url: str, expect_status: int, expect_in: str | None = None,
+                  label: str | None = None) -> None:
+        final, matched = resolve(url, rules)
+        if matched is None:
+            check(label or url, False,
+                  f"no rewrite matched {url} - the platform would serve its own 404")
+            return
+        status, ctype, body = asyncio.run(_fetch(final))
+        ok = status == expect_status and (not expect_in or expect_in in body or expect_in in ctype)
+        check(label or url, ok, f"{url} -> {final} [{status}] {ctype.split(';')[0]}")
+
+    # the root URL is the one that was broken in production
+    check_url("/", 200, "text/html", label="/ (the URL that returned 404)")
+    for route in ("/login", "/register", "/wallet", "/account", "/history",
+                  "/leaderboard", "/promotions", "/crash", "/admin"):
+        check_url(route, 200, "text/html", label=f"{route} (client-side route)")
+    check_url("/game/slots", 200, "text/html", label="/game/:slug")
+    check_url("/legal/terms", 200, "text/html", label="/legal/:doc")
+    check_url("/checkout/abc123", 200, "text/html", label="/checkout/:id")
+    check_url("/admin/users", 200, "text/html", label="/admin/* nested")
+
+    dist = ROOT / "frontend" / "dist"
+    if (dist / "assets").is_dir():
+        for pattern in ("*.js", "*.css"):
+            asset = next((dist / "assets").glob(pattern), None)
+            if asset:
+                check_url(f"/assets/{asset.name}", 200,
+                          label=f"/assets/{asset.name[:20]}... (hashed, immutable)")
+    check_url("/brand/logo.webp", 200, label="/brand/logo.webp")
+    check_url("/games/dice.webp", 200, label="/games/dice.webp")
+
+    # The API must not be shadowed by any of this. /api/* reaches the function
+    # through the filesystem, not a rewrite, so the correct result here is
+    # "no rule matched" - plus a direct call proving the endpoint still answers.
+    api_final, api_matched = resolve("/api/health", rules)
+    check("no rewrite swallows the API", api_matched is None,
+          "/api/* is routed to the function by the filesystem, as intended")
+    status, _, body = asyncio.run(_fetch("/api/health"))
+    check("/api/health still answers", status == 200 and '"status"' in body,
+          f"http {status}")
+
+    # a missing asset is a real 404, not index.html pretending to be one
+    final, _ = resolve("/assets/does-not-exist.js", rules)
+    status, _, _ = asyncio.run(_fetch(final))
+    check("a missing asset returns 404, not a fake 200", status == 404, f"http {status}")
+
+    # traversal must never escape the bundle
+    for attack in ("/assets/../../../../etc/passwd",
+                   "/api/site/../../../../etc/passwd"):
+        final, _ = resolve(attack, rules)
+        status, _, body = asyncio.run(_fetch(final))
+        check(f"traversal blocked: {attack[:30]}", "root:" not in body, f"http {status}")
+
+
+vercel_routing_section()
+
+print(f"\nfinal: {len(PASSED)} passed, {len(FAILED)} failed")
 if FAILED:
     for name in FAILED:
         print(f"  FAILED: {name}")
     sys.exit(1)
+print("the Vercel-shaped deployment behaves correctly, root URL included")

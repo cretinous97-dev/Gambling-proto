@@ -1,17 +1,33 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "cd frontend && npm ci && npm run build",
   "installCommand": "cd frontend && npm ci",
-  "outputDirectory": "frontend/dist",
+  "framework": null,
   "functions": {
     "api/[...path].py": {
-      "includeFiles": "backend/**",
-      "memory": 1024,
-      "maxDuration": 60
+      "includeFiles": ["backend/**", "frontend/dist/**"],
+      "memory": 1024
     }
   },
   "rewrites": [
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/", "destination": "/api/site" },
+    { "source": "/login", "destination": "/api/site/login" },
+    { "source": "/register", "destination": "/api/site/register" },
+    { "source": "/wallet", "destination": "/api/site/wallet" },
+    { "source": "/account", "destination": "/api/site/account" },
+    { "source": "/history", "destination": "/api/site/history" },
+    { "source": "/leaderboard", "destination": "/api/site/leaderboard" },
+    { "source": "/promotions", "destination": "/api/site/promotions" },
+    { "source": "/crash", "destination": "/api/site/crash" },
+    { "source": "/admin", "destination": "/api/site/admin" },
+    { "source": "/checkout/(.*)", "destination": "/api/site/checkout/$1" },
+    { "source": "/legal/(.*)", "destination": "/api/site/legal/$1" },
+    { "source": "/game/(.*)", "destination": "/api/site/game/$1" },
+    { "source": "/admin/(.*)", "destination": "/api/site/admin/$1" },
+    { "source": "/assets/(.*)", "destination": "/api/site/assets/$1" },
+    { "source": "/games/(.*)", "destination": "/api/site/games/$1" },
+    { "source": "/brand/(.*)", "destination": "/api/site/brand/$1" },
+    { "source": "/favicon.ico", "destination": "/api/site/favicon.ico" },
+    { "source": "/robots.txt", "destination": "/api/site/robots.txt" }
   ],
   "headers": [
     {
