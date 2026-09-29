@@ -196,7 +196,7 @@ export const api = {
 }
 
 /** Open the crash websocket through the same origin the page was served from. */
-export function openCrashSocket(onMessage) {
+export function openCrashSocket(onMessage, onOpen) {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const token = tokens.access ? `?token=${encodeURIComponent(tokens.access)}` : ''
   let socket
@@ -215,6 +215,7 @@ export function openCrashSocket(onMessage) {
     socket.onopen = () => {
       retry = 0
       opened = true
+      onOpen?.()
     }
     let opened = false
     let failures = 0

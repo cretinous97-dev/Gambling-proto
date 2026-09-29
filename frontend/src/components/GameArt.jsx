@@ -20,9 +20,9 @@ export const GAME_ART = {
   mines: '/games/mines',
   plinko: '/games/plinko',
   wheel: '/games/wheel',
-  keno: null,
-  coinflip: null,
-  limbo: null,
+  keno: '/games/keno',
+  coinflip: '/games/coinflip',
+  limbo: '/games/limbo',
 }
 
 /** Emoji fallback, matching the lobby's original look. */

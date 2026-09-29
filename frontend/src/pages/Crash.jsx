@@ -22,11 +22,11 @@ export default function Crash() {
   const [busy, setBusy] = useState(false)
   const [history, setHistory] = useState([])
   const lastFrame = useRef({ at: 0, multiplier: 1, phase: 'betting' })
+  const connected = useRef(false)
   const [display, setDisplay] = useState(1)
 
   // ---- live feed ---------------------------------------------------------
   useEffect(() => {
-    let socket
     const onMessage = (msg) => {
       if (msg.type !== 'crash.state') return
       lastFrame.current = {
@@ -42,11 +42,25 @@ export default function Crash() {
         refreshMyBet()
       }
     }
-    socket = openCrashSocket(onMessage)
+    // Wire the live feed. If the transport never connects - serverless rejects
+    // the upgrade, a proxy strips it, a corporate network blocks it - the poll
+    // below is the only thing keeping the game on screen, so it must not wait
+    // for the socket to fail first.
+    let socket = null
+    try {
+      socket = openCrashSocket(onMessage, () => {
+        connected.current = true
+      })
+    } catch {
+      socket = null
+    }
 
     // REST fallback so the page still works if websockets are blocked
     const poll = setInterval(async () => {
-      if (Date.now() - lastFrame.current.at < 4000) return
+      // A live socket sends a frame every 250ms, so a fresh frame means the
+      // socket is healthy. Otherwise poll - which is the normal path on a
+      // deployment without websocket support.
+      if (connected.current && Date.now() - lastFrame.current.at < 4000) return
       try {
         const s = await api.crashState()
         onMessage({ type: 'crash.state', ...s, multiplier: s.multiplier ?? 1 })
