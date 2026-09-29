@@ -505,6 +505,22 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
 
+class AppSetting(Base):
+    """Small key/value store for values that must survive a restart.
+
+    Used for one thing today: a signing key generated at boot when SECRET_KEY
+    is not configured. Storing it here keeps sessions valid across cold starts
+    instead of logging every player out each time a serverless instance is
+    recycled.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(512))
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow)
+
+
 class JackpotPool(Base):
     __tablename__ = "jackpot_pools"
 

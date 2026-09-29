@@ -26,7 +26,7 @@ from .db import init_db, session_scope
 from .models import User, UserRole
 from .payments import provider_status
 from .routers import admin, auth, crash, games, misc, wallet
-from .security import hash_password
+from .security import hash_password, signing_key_source
 from .services import crash_loop
 from .services.crash_loop import ops_loop, run_forever
 
@@ -86,6 +86,12 @@ def bootstrap_app() -> None:
         if _bootstrapped:
             return
         init_db()
+        # Resolve the session signing key here, outside any request: on SQLite
+        # a competing write from inside a request can lock, and a token signed
+        # with one key must verify with the same key on every instance.
+        from .security import ensure_signing_key
+
+        ensure_signing_key()
         seed_admin()
         crash_loop.bootstrap()
         status = provider_status()
@@ -204,6 +210,10 @@ def health():
             "background_loops": not settings.serverless,
             "websockets": not settings.serverless,
             "balances_persist": not settings.persistence_is_temporary,
+            # "environment" (SECRET_KEY set), "database" (generated once and
+            # reused), or "process" (changes on every restart - players get
+            # logged out).
+            "signing_key_source": signing_key_source(),
         },
     }
 

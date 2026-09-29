@@ -34,7 +34,7 @@ in the Vercel dashboard:
 
 | Variable | Where to get it | Consequence if missing |
 |---|---|---|
-| `SECRET_KEY` | `python3 -c "import secrets;print(secrets.token_urlsafe(64))"` | every cold start mints a new key, logging everyone out |
+| `SECRET_KEY` | Step 1 below | **not mandatory** (see the table under Step 4), but sessions can drop |
 | `ADMIN_PASSWORD` | choose one | the seeded `Admin!2345` is public knowledge |
 | `CORS_ORIGINS` | `https://your-app.vercel.app` | default `*` allows any site to call your API |
 | `DATABASE_URL` | see Group B | balances reset when the function is recycled |

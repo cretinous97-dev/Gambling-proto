@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import logging
 import secrets
 import time
 from datetime import timedelta
@@ -15,8 +16,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import settings
+
+log = logging.getLogger("security")
 from .db import get_db
-from .models import RefreshToken, SessionAudit, User, UserRole, utcnow
+from .models import AppSetting, RefreshToken, SessionAudit, User, UserRole, utcnow
 
 ACCESS = "access"
 REFRESH = "refresh"
@@ -38,6 +41,110 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Signing key
+# ---------------------------------------------------------------------------
+# Resolved at CALL time rather than import time, because on a serverless
+# platform the key may not exist when the module is first imported.
+_key_name = "session_signing_key"
+_active_key: str | None = None
+
+
+def _env_key_is_explicit() -> bool:
+    """True when the operator deliberately configured a key."""
+    return bool(settings.secret_key) and not settings.ephemeral_secret_key
+
+
+def ensure_signing_key() -> str:
+    """Resolve the token signing key once, outside any request.
+
+    Called from application bootstrap, where there is no concurrent request
+    holding a write transaction - important on SQLite, where inserting a row
+    from inside a request handler can hit a lock and fail.
+
+    Precedence:
+      1. SECRET_KEY from the environment (set this in production)
+      2. a key generated once and stored in the database, so sessions survive
+         restarts and cold starts
+      3. a process-local key, if the database is unreachable
+    """
+    global _active_key
+    if _active_key is not None:
+        return _active_key
+
+    if _env_key_is_explicit():
+        _active_key = settings.secret_key
+        return _active_key
+
+    from sqlalchemy.exc import IntegrityError
+
+    from .db import session_scope
+    from .models import AppSetting
+
+    try:
+        with session_scope() as db:
+            row = db.get(AppSetting, _key_name)
+            if row is not None:
+                _active_key = row.value
+                return _active_key
+
+        # Generate one. Two instances may race here, so the loser re-reads
+        # rather than assuming it failed.
+        try:
+            with session_scope() as db:
+                db.add(AppSetting(key=_key_name, value=secrets.token_urlsafe(64)))
+                db.flush()
+        except IntegrityError:
+            pass
+
+        with session_scope() as db:
+            row = db.get(AppSetting, _key_name)
+            if row is not None:
+                _active_key = row.value
+                log.warning(
+                    "SECRET_KEY is not set: using a generated signing key stored "
+                    "in the database. Sessions survive restarts, but set "
+                    "SECRET_KEY in the environment for production."
+                )
+                return _active_key
+    except Exception:  # database unavailable or read-only
+        log.exception(
+            "could not read or store a signing key; falling back to a "
+            "process-local key. Sessions will not survive a restart."
+        )
+
+    _active_key = settings.secret_key or secrets.token_urlsafe(64)
+    return _active_key
+
+
+def signing_key() -> str:
+    """The key used to sign and verify session tokens."""
+    return ensure_signing_key()
+
+
+def signing_key_source() -> str:
+    """Where the active signing key came from - surfaced by /api/health so a
+    session problem is diagnosable instead of mysterious."""
+    if _env_key_is_explicit():
+        return "environment"
+    from .db import session_scope
+    from .models import AppSetting
+
+    try:
+        with session_scope() as db:
+            if db.get(AppSetting, _key_name) is not None:
+                return "database"
+    except Exception:
+        return "process"
+    return "process"
+
+
+def reset_signing_key_cache() -> None:
+    """Test helper: forget the cached key so a new one is resolved."""
+    global _active_key
+    _active_key = None
+
+
 def _encode(user: User, kind: str, ttl: timedelta) -> str:
     now = int(time.time())
     payload = {
@@ -49,7 +156,7 @@ def _encode(user: User, kind: str, ttl: timedelta) -> str:
         "exp": now + int(ttl.total_seconds()),
         "jti": secrets.token_hex(8),
     }
-    return jwt.encode(payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, signing_key(), algorithm=settings.jwt_algorithm)
 
 
 def create_access_token(user: User) -> str:
@@ -68,7 +175,7 @@ def create_refresh_token(user: User, db: Session) -> str:
     # Compact token = jwt header carrying the DB row id + the opaque secret.
     header = jwt.encode(
         {"tid": "pending", "sub": user.id, "typ": REFRESH, "raw": raw[:8]},
-        settings.secret_key,
+        signing_key(),
         algorithm=settings.jwt_algorithm,
     )
     return header
@@ -76,7 +183,7 @@ def create_refresh_token(user: User, db: Session) -> str:
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        return jwt.decode(token, signing_key(), algorithms=[settings.jwt_algorithm])
     except jwt.ExpiredSignatureError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired, please log in again.")
     except jwt.PyJWTError:
