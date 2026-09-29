@@ -51,10 +51,15 @@ def frontend_dist() -> Path | None:
     override = os.getenv("FRONTEND_DIST")
     if override:
         candidates.append(Path(override))
+    # backend/static is where the deploy build puts the site (see the
+    # buildCommand in vercel.json). frontend/dist is the local development
+    # layout. Both are checked so the same code works in either.
     candidates += [
+        Path(__file__).resolve().parent.parent / "static",
         Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
         Path.cwd() / "frontend" / "dist",
         Path.cwd() / "dist",
+        Path.cwd() / "backend" / "static",
     ]
     for candidate in candidates:
         if (candidate / "index.html").is_file():
@@ -300,6 +305,7 @@ async def site(asset_path: str = ""):
         tried = ", ".join(
             str(p) for p in (
                 os.getenv("FRONTEND_DIST"),
+                Path(__file__).resolve().parent.parent / "static",
                 Path(__file__).resolve().parent.parent.parent / "frontend" / "dist",
                 Path.cwd() / "frontend" / "dist",
                 Path.cwd() / "dist",

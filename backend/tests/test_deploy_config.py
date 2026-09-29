@@ -182,19 +182,109 @@ def test_every_route_in_the_router_is_reachable_on_a_deep_link():
     )
 
 
-def test_the_built_app_is_bundled_into_the_function():
-    """The function serves the site, so the build output must be in its bundle."""
+# ---------------------------------------------------------------------------
+# Schema shape
+# ---------------------------------------------------------------------------
+# Vercel validates vercel.json against a JSON schema before building, and a
+# schema violation fails the deployment outright. The one that bit us:
+#
+#     functions.api/[...path].py.includeFiles should be string
+#
+# The runtime happily accepts an array, but the published schema does not, so
+# only the schema matters. These tests encode the shape for every key we use.
+
+FUNCTION_STRING_KEYS = ("includeFiles", "excludeFiles", "runtime")
+
+
+def test_function_include_files_is_a_single_string():
+    """The schema requires a string. An array deploys... nowhere.
+
+    Because one pattern must cover everything the function needs, the build
+    copies the site into backend/static, which is already inside backend/**.
+    """
     functions = json.loads(VERCEL_JSON.read_text())["functions"]
     entry = next(v for k, v in functions.items() if "api/" in k)
-    includes = entry["includeFiles"]
-    if isinstance(includes, str):
-        includes = [includes]
-    joined = " ".join(includes)
-    assert "frontend/dist" in joined, (
-        "frontend/dist is not bundled into the function; the site cannot be "
-        "served without it"
+
+    include = entry["includeFiles"]
+    assert isinstance(include, str), (
+        f"includeFiles must be a string per the schema, got {type(include).__name__}: "
+        f"{include!r}. Vercel rejects the whole deployment with "
+        "'should be string'."
     )
-    assert "backend" in joined
+    assert len(include) <= 256, "the schema caps includeFiles at 256 characters"
+    assert "backend" in include, "the function must be bundled with the application"
+
+
+def test_the_build_puts_the_site_inside_the_function_bundle():
+    """One includeFiles pattern has to cover both the app and the site, so the
+    build copies the built site into backend/static."""
+    config = json.loads(VERCEL_JSON.read_text())
+    build = config["buildCommand"]
+    assert "npm run build" in build
+    assert "backend/static" in build, (
+        "the build no longer copies the site into backend/static, so the "
+        "function bundle would not contain it"
+    )
+
+    source = (ROOT / "backend" / "app" / "main.py").read_text()
+    assert '"static"' in source, (
+        "the dist resolver does not look in backend/static, so a deployment "
+        "would not find the bundled site"
+    )
+
+
+def test_every_function_key_has_the_type_the_schema_expects():
+    """Type-check the keys we set inside a function entry."""
+    functions = json.loads(VERCEL_JSON.read_text())["functions"]
+    assert functions, "no functions configured"
+
+    for pattern, entry in functions.items():
+        assert len(pattern) <= 256, f"function pattern too long: {pattern}"
+        assert isinstance(entry, dict), f"{pattern} must be an object"
+        for key in FUNCTION_STRING_KEYS:
+            if key in entry:
+                assert isinstance(entry[key], str), (
+                    f"functions.{pattern}.{key} must be a string, got "
+                    f"{type(entry[key]).__name__}"
+                )
+                assert len(entry[key]) <= 256
+        if "memory" in entry:
+            assert isinstance(entry["memory"], (int, float)) and not isinstance(
+                entry["memory"], bool
+            ), f"functions.{pattern}.memory must be a number"
+        if "maxDuration" in entry:
+            assert isinstance(entry["maxDuration"], (int, str)), (
+                f"functions.{pattern}.maxDuration must be a number or a string"
+            )
+
+
+def test_top_level_keys_have_the_types_the_schema_expects():
+    config = json.loads(VERCEL_JSON.read_text())
+
+    for key in ("buildCommand", "installCommand", "devCommand", "outputDirectory",
+                "buildCommand", "cleanUrls", "trailingSlash", "public"):
+        if key in config and key not in ("cleanUrls", "trailingSlash", "public"):
+            assert isinstance(config[key], str), f"{key} must be a string"
+
+    if "framework" in config:
+        assert config["framework"] is None or isinstance(config["framework"], str), (
+            "framework must be a string (or null to disable detection)"
+        )
+
+    for rule in config.get("rewrites", []):
+        assert set(rule) <= {"source", "destination", "has", "missing", "permanent"}, rule
+        assert isinstance(rule["source"], str) and isinstance(rule["destination"], str)
+
+    for header in config.get("headers", []):
+        assert isinstance(header["source"], str)
+        for item in header["headers"]:
+            assert isinstance(item["key"], str) and isinstance(item["value"], str)
+
+
+def test_the_config_is_only_as_large_as_it_needs_to_be():
+    """A sanity bound: a runaway save should not quietly bloat the config."""
+    raw = VERCEL_JSON.read_text()
+    assert len(raw) < 20_000, f"vercel.json is {len(raw)} bytes"
 
 
 def test_the_config_does_not_force_an_output_directory():
