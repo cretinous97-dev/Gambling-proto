@@ -142,3 +142,71 @@ def test_an_explicit_secret_key_wins_over_the_stored_one(fresh_db: Path):
     assert "an-explicitly-configured-key" in result.stdout, (
         "an environment SECRET_KEY must take precedence over the stored fallback"
     )
+
+
+#: Boot the configuration exactly as the app does, and report the key it would
+#: have used. Deliberately imports nothing else: the refusal must happen before
+#: a database is opened or a server is bound.
+PROD_BOOT_SCRIPT = r"""
+import json, os, sys
+sys.path.insert(0, os.environ["BACKEND_DIR"])
+try:
+    from app.config import get_settings
+    settings = get_settings()
+except RuntimeError as exc:
+    print(json.dumps({"refused": True, "message": str(exc)}))
+else:
+    print(json.dumps({"refused": False, "secret_key": settings.secret_key}))
+"""
+
+
+def boot_in_production(secret_key: str | None) -> dict:
+    env = {
+        **os.environ,
+        "BACKEND_DIR": str(BACKEND),
+        "PYTHONPATH": str(BACKEND),
+        "ENVIRONMENT": "production",       # take the guard out of demo mode
+        "DATABASE_URL": "sqlite:////tmp/production-boot-check.db",
+    }
+    env.pop("SECRET_KEY", None)
+    if secret_key is not None:
+        env["SECRET_KEY"] = secret_key
+
+    result = subprocess.run(
+        [sys.executable, "-c", PROD_BOOT_SCRIPT],
+        capture_output=True, text=True, env=env, cwd=str(BACKEND), timeout=120,
+    )
+    assert result.returncode == 0, f"child failed:\n{result.stdout}\n{result.stderr}"
+    line = [ln for ln in result.stdout.splitlines() if ln.startswith("{")][-1]
+    return json.loads(line)
+
+
+def test_production_refuses_to_boot_without_an_explicit_secret_key():
+    """The generated key is a development convenience, not a production one.
+
+    The app persists a generated key in the database so that sessions survive a
+    cold start, which is the right call for a test deployment and the wrong one
+    for one holding real money: the key then lives beside the sessions it signs,
+    so anything that can read the database - a leaked backup, a reporting
+    replica, an over-broad read-only role - can mint a session for any account,
+    the admin included.
+
+    Refusing to start is the entire control. Without it, a copy-pasted deploy
+    with a default key produces forgeable admin sessions and says nothing.
+    """
+    outcome = boot_in_production(secret_key=None)
+
+    assert outcome["refused"], (
+        "the app booted in production without SECRET_KEY - sessions signed with "
+        "the built-in default are forgeable by anyone who has read this source"
+    )
+    assert "SECRET_KEY" in outcome["message"]
+
+
+def test_production_boots_with_an_explicit_secret_key():
+    """The guard must refuse the default, not production itself."""
+    key = "a-real-key-from-the-environment-" + "x" * 32
+    outcome = boot_in_production(secret_key=key)
+
+    assert not outcome["refused"], outcome.get("message")
+    assert outcome["secret_key"] == key
