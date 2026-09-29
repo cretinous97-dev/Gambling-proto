@@ -189,6 +189,32 @@ export const api = {
   adminAudit: () => request('/api/admin/audit'),
   adminLedger: () => request('/api/admin/ledger'),
   adminWebhooks: () => request('/api/admin/webhooks'),
+
+  // --- banking method manager ---------------------------------------------
+  // The admin's registry of payment pathways. Everything here is data: adding
+  // a bank here makes it live for its markets on the next transaction, with no
+  // deploy. No endpoint in this block accepts or returns a credential - a
+  // pathway carries the NAME of the environment variable that holds its key.
+  bankingMethods: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== ''),
+    ).toString()
+    return request(`/api/admin/banking-methods${qs ? `?${qs}` : ''}`)
+  },
+  createBankingMethod: (body) =>
+    request('/api/admin/banking-methods', { method: 'POST', body }),
+  updateBankingMethod: (id, body) =>
+    request(`/api/admin/banking-methods/${id}`, { method: 'PATCH', body }),
+  toggleBankingMethod: (id) =>
+    request(`/api/admin/banking-methods/${id}/toggle`, { method: 'POST' }),
+  retireBankingMethod: (id) =>
+    request(`/api/admin/banking-methods/${id}`, { method: 'DELETE' }),
+  explainRouting: (params) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== ''),
+    ).toString()
+    return request(`/api/admin/banking-methods/any/explain?${qs}`)
+  },
   adminBigWins: () => request('/api/admin/big-wins'),
   adminSessions: () => request('/api/admin/sessions'),
   adminGrantBonus: (body) => request('/api/admin/bonuses/grant', { method: 'POST', body }),

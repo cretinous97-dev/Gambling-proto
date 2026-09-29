@@ -3,6 +3,7 @@ import { api } from '../lib/api.js'
 import { fmtCents, fmtDate, fmtMultiplier } from '../lib/format.js'
 import { ActionButton, Alert, Badge, Card, Empty, Loading, Modal, Stat, Tabs } from '../components/ui.jsx'
 import { useStore } from '../lib/store.jsx'
+import BankingManager from './admin/BankingManager.jsx'
 
 /**
  * Back office. Everything here is a privileged operation and every mutation is
@@ -27,6 +28,7 @@ export default function Admin() {
           { id: 'deposits', label: 'Deposits' },
           { id: 'users', label: 'Players' },
           { id: 'bonuses', label: 'Bonuses' },
+          { id: 'banking', label: 'Banking methods' },
           { id: 'risk', label: 'Risk & AML' },
           { id: 'ledger', label: 'Ledger' },
           { id: 'audit', label: 'Audit log' },
@@ -38,6 +40,7 @@ export default function Admin() {
       {tab === 'deposits' && <Deposits onError={setError} />}
       {tab === 'users' && <Users onError={setError} toast={toast} />}
       {tab === 'bonuses' && <Bonuses onError={setError} toast={toast} />}
+      {tab === 'banking' && <BankingManager onError={setError} toast={toast} />}
       {tab === 'risk' && <Risk />}
       {tab === 'ledger' && <Ledger onError={setError} />}
       {tab === 'audit' && <Audit onError={setError} />}
