@@ -26,7 +26,7 @@ from .config import settings
 from .db import init_db, session_scope
 from .models import User, UserRole
 from .payments import provider_status
-from .routers import admin, auth, crash, games, misc, wallet
+from .routers import admin, auth, crash, games, misc, payments, wallet
 from .security import hash_password, signing_key_source
 from .services import crash_loop
 from .services.crash_loop import ops_loop, run_forever
@@ -223,6 +223,9 @@ app.include_router(games.router)
 app.include_router(crash.router)
 app.include_router(admin.router)
 app.include_router(misc.router)
+# Provider callbacks are mounted before the SPA catch-all for the same reason
+# every API router is: an unmatched POST must 404 as JSON, never as HTML.
+app.include_router(payments.router)
 
 
 @app.get("/api/health")

@@ -20,6 +20,8 @@ Guarantees:
 """
 from __future__ import annotations
 
+import hashlib
+import logging
 import secrets
 
 from fastapi import HTTPException, status
@@ -55,6 +57,8 @@ from ..money import pct_of
 from ..payments import PaymentError, get_provider
 from . import bonus as bonus_svc
 from . import compliance
+
+log = logging.getLogger("app.payments.ledger")
 
 TERMINAL_DEPOSIT = (DepositStatus.succeeded, DepositStatus.chargeback)
 CRYPTO_METHODS = (
@@ -523,38 +527,110 @@ def cancel_withdrawal(db: Session, user: User, withdrawal: Withdrawal) -> Withdr
 # ---------------------------------------------------------------------------
 # webhooks
 # ---------------------------------------------------------------------------
+def event_fingerprint(raw_body: bytes) -> str:
+    """A stable id for a callback that does not carry one.
+
+    Stripe sends `id`, Adyen a `pspReference`, but a provider that sends
+    neither would otherwise be processed once per delivery - and PSPs retry.
+    Hashing the exact bytes makes "the same callback again" detectable for any
+    provider, without trusting a field the caller controls.
+    """
+    return "sha256:" + hashlib.sha256(raw_body or b"").hexdigest()[:40]
+
+
+def record_rejected_webhook(
+    *,
+    provider: str,
+    raw_body: bytes,
+    error: str,
+    signature_valid: bool,
+    event: dict | None = None,
+) -> None:
+    """Persist a refused callback in its own transaction.
+
+    This cannot use the request's session: the request is about to roll back
+    (that is what raising does), which would take the audit row with it and
+    leave an operator with a signature mismatch, no errors in the log they can
+    correlate, and no evidence the provider ever called. One commit of its own.
+    """
+    from ..db import session_scope
+
+    try:
+        with session_scope() as side_db:
+            event = event or {}
+            side_db.add(
+                PaymentWebhook(
+                    provider=provider,
+                    event_id=event.get("id")
+                    or event.get("event_id")
+                    or event_fingerprint(raw_body),
+                    event_type=str(event.get("type", "unknown")),
+                    payload=event or {"unparsed": raw_body[:2000].decode("latin-1")},
+                    signature_valid=signature_valid,
+                    processed=False,
+                    error=error[:2000],
+                )
+            )
+    except Exception:  # pragma: no cover - the audit must never mask the refusal
+        log.exception("could not record a rejected %s webhook", provider)
+
+
 def ingest_webhook(db: Session, raw_body: bytes, signature: str | None) -> dict:
     provider = get_provider()
     ok, event = provider.verify_webhook(raw_body, signature)
 
-    event_id = event.get("id") or event.get("event_id")
-    if event_id:
-        dupe = db.execute(
-            select(PaymentWebhook).where(PaymentWebhook.event_id == event_id)
-        ).scalar_one_or_none()
-        if dupe is not None and dupe.processed:
-            return {"status": "duplicate", "event_id": event_id}
+    # Every provider gets a dedup key, whether it supplied one or not.
+    event_id = (
+        event.get("id")
+        or event.get("event_id")
+        or event_fingerprint(raw_body)
+    )
+
+    dupe = db.execute(
+        select(PaymentWebhook).where(PaymentWebhook.event_id == event_id)
+    ).scalar_one_or_none()
+    if dupe is not None and dupe.processed:
+        # A retry of something already applied. 200, no work, no second credit.
+        return {"status": "duplicate", "event_id": event_id}
+
+    if not ok:
+        record_rejected_webhook(
+            provider=provider.name,
+            raw_body=raw_body,
+            error="invalid signature",
+            signature_valid=False,
+        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid webhook signature")
 
     row = PaymentWebhook(
         provider=provider.name,
         event_id=event_id,
         event_type=str(event.get("type", "unknown")),
         payload=event,
-        signature_valid=ok,
+        signature_valid=True,
     )
     db.add(row)
     db.flush()
 
-    if not ok:
-        row.error = "invalid signature"
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid webhook signature")
-
     try:
         result = provider.handle_webhook(db, event)
-        row.processed = True
-        db.flush()
-        return {"status": "processed", "detail": result, "event_id": event_id}
     except (PaymentError, HTTPException) as exc:
-        row.error = str(exc)
-        db.flush()
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Webhook rejected: {exc}")
+        # The event itself is genuine - we just could not apply it. Record the
+        # reason where an operator can replay it, and tell the provider to try
+        # again (a non-2xx is a retry).
+        db.rollback()
+        record_rejected_webhook(
+            provider=provider.name,
+            raw_body=raw_body,
+            error=str(exc),
+            signature_valid=True,
+            event=event,
+        )
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"Webhook could not be applied: {exc}",
+        ) from exc
+
+    row.processed = True
+    db.flush()
+    return {"status": "processed", "detail": result, "event_id": event_id}

@@ -8,6 +8,7 @@ from .base import DepositIntent, PaymentError, PaymentProvider, PayoutResult
 from .sandbox import SandboxProvider, sandbox_provider
 
 __all__ = [
+    "AdyenProvider",
     "DepositIntent",
     "PaymentError",
     "PaymentProvider",
@@ -27,12 +28,17 @@ def get_provider() -> PaymentProvider:
         from .stripe_provider import StripeProvider
 
         return StripeProvider()
+    if name == "adyen":
+        from .adyen import AdyenProvider
+
+        return AdyenProvider()
     if name == "cryptopay":
         from .cryptopay import CryptoPayProvider
 
         return CryptoPayProvider()
     raise RuntimeError(
-        f"unknown PAYMENT_PROVIDER={name!r} (expected sandbox | stripe | cryptopay)"
+        f"unknown PAYMENT_PROVIDER={name!r} "
+        "(expected sandbox | stripe | adyen | cryptopay)"
     )
 
 

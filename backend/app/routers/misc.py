@@ -6,20 +6,23 @@ legal advice.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from sqlalchemy import select
 
+from .. import i18n
 from ..config import settings
 from ..models import BonusCode, ChatMessage, JackpotPool, User
 from ..payments import provider_status
 from ..schemas import ChatIn
 from ..security import CurrentUser, Db, MaybeUser
+from ..services import geo, jurisdiction
 
 router = APIRouter(prefix="/api", tags=["public"])
 
 
 @router.get("/config")
-def site_config():
+def site_config(request: Request):
+    region = geo.region_of(request)
     return {
         "name": settings.app_name,
         "environment": settings.environment,
@@ -40,7 +43,20 @@ def site_config():
             "first_deposit_cap": int(settings.first_deposit_bonus_max_usd * 100),
             "first_deposit_wager_x": settings.first_deposit_bonus_wager_x,
         },
-        "jurisdiction_blocklist": sorted(settings.blocklist),
+        # The effective policy, not the raw env string: a player refused at
+        # signup can be told the rule that refused them.
+        "jurisdiction": jurisdiction.snapshot(),
+        # Localization: languages, display currencies, presentation-only rates.
+        "i18n": i18n.snapshot(),
+        "region": {
+            **region.as_dict(),
+            "suggested_locale": i18n.locale_for(
+                region.country, request.headers.get("accept-language")
+            ),
+            "suggested_currency": i18n.currency_for(
+                region.country or settings.default_locale
+            ),
+        },
         # Surface the deployment honestly: a public test deployment moves no
         # real money and may not persist balances between restarts. The UI
         # shows a banner rather than letting testers think they lost funds.
@@ -50,6 +66,31 @@ def site_config():
             "balances_persist": not settings.persistence_is_temporary,
             "real_money": provider_status().get("mode") == "live",
         },
+    }
+
+
+@router.get("/i18n")
+def localization():
+    """Just the localization block, for clients that cache /config separately."""
+    return i18n.snapshot()
+
+
+@router.get("/region")
+def caller_region(request: Request):
+    """Where the edge thinks this caller is, and what we would offer them.
+
+    Public and cheap: the frontend calls it once at boot to pick a starting
+    language and currency when the player has expressed no preference. It is
+    a hint - the account's own setting always wins.
+    """
+    region = geo.region_of(request)
+    return {
+        **region.as_dict(),
+        "suggested_locale": i18n.locale_for(
+            region.country, request.headers.get("accept-language")
+        ),
+        "suggested_currency": i18n.currency_for(region.country or settings.default_locale),
+        "settlement_currency": settings.settlement_currency.upper(),
     }
 
 

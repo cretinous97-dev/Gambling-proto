@@ -102,7 +102,51 @@ def session_scope() -> Iterator[Session]:
         db.close()
 
 
+#: Additive column patches, applied on boot.
+#:
+#: `create_all` creates missing TABLES and never touches an existing one, so a
+#: model that gains a column would work on a fresh database and fail on every
+#: deployment that already has data. That is the worst kind of bug: it only
+#: appears in production, on the instance that matters.
+#:
+#: Each entry is (table, column, SQL type). They are additive and nullable by
+#: design - a patch must never rewrite or drop data, because it runs
+#: automatically and unattended.
+#:
+#: This is deliberately the smallest thing that can work. It is not a migration
+#: framework: it cannot rename, backfill or re-type. The moment a schema change
+#: needs any of those, adopt Alembic - backend/sql/schema.sql is the current
+#: shape, and README "Database changes" describes the switch.
+COLUMN_PATCHES: tuple[tuple[str, str, str], ...] = (
+    ("withdrawals", "payout_ref", "VARCHAR(191)"),
+)
+
+
+def _ensure_columns() -> list[str]:
+    """Add any missing patched column. Safe to run on every boot."""
+    from sqlalchemy import inspect, text
+
+    applied: list[str] = []
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    for table, column, sql_type in COLUMN_PATCHES:
+        if table not in existing_tables:
+            continue
+        columns = {c["name"] for c in inspector.get_columns(table)}
+        if column in columns:
+            continue
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}"))
+        applied.append(f"{table}.{column}")
+    return applied
+
+
 def init_db() -> None:
     from . import models  # noqa: F401  (register mappers)
 
     Base.metadata.create_all(bind=engine)
+    applied = _ensure_columns()
+    if applied:
+        import logging
+
+        logging.getLogger("app.db").info("schema patches applied: %s", ", ".join(applied))

@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import func, select
 
+from .. import i18n
 from ..config import settings
+from ..services import geo, jurisdiction
 from ..ledger import ensure_user_accounts, get_balance
 from ..models import (
     AccountKind,
@@ -45,6 +48,8 @@ from ..services import bonus as bonus_svc
 from ..services import compliance
 from ..services.wallet import balances, stats
 
+log = logging.getLogger("app.routers.auth")
+
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
@@ -77,10 +82,26 @@ def _user_payload(db: Db, user: User) -> dict:
 @router.post("/register", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterIn, request: Request, db: Db):
     compliance.assert_age(payload.date_of_birth)
-    if payload.country.upper() in settings.blocklist:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            f"Registration is not available in {payload.country.upper()}.",
+
+    # The declared country is checked against the policy. When geo enforcement
+    # is on and the edge told us where the caller is, that is what is judged -
+    # a country field in a signup form is a claim, not evidence.
+    declared = payload.country.upper()
+    judging = declared
+    if settings.geo_enforcement:
+        edge = geo.caller_country(request)
+        if edge:
+            judging = edge
+    decision = jurisdiction.assert_allowed(judging, jurisdiction.REGISTER)
+    if decision.country and decision.country != declared:
+        # Not a refusal on its own: worth an audit trail, because a mismatch
+        # between the signup form and the network is what a fraud review asks
+        # about first. (VPN, travel and corporate egress all produce it too.)
+        log.info(
+            "registration country mismatch declared=%s edge=%s user_agent=%s",
+            declared,
+            decision.country,
+            (request.headers.get("user-agent") or "")[:80],
         )
 
     email = payload.email.lower().strip()
@@ -122,7 +143,13 @@ def register(payload: RegisterIn, request: Request, db: Db):
         except ValueError:
             pass
 
-    audit(db, user.id, "auth.register", request, {"country": user.country})
+    audit(
+        db,
+        user.id,
+        "auth.register",
+        request,
+        {"country": user.country, "jurisdiction": decision.as_dict()},
+    )
     return _issue(db, user)
 
 
@@ -187,12 +214,15 @@ def me(user: CurrentUser, db: Db):
 def update_profile(payload: ProfileUpdateIn, user: CurrentUser, db: Db):
     if payload.display_currency:
         cur = payload.display_currency.upper()
-        from ..money import SUPPORTED_CURRENCIES
-
-        if cur not in SUPPORTED_CURRENCIES:
+        # Validated against the live localization table rather than the legacy
+        # hardcoded list: a currency the operator has not given a display rate
+        # to must not be selectable, or the UI would show a converted amount it
+        # cannot compute.
+        allowed = i18n.available_currencies()
+        if cur not in allowed:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                f"Supported display currencies: {', '.join(SUPPORTED_CURRENCIES)}",
+                f"Unsupported display currency {cur!r}. Available: {', '.join(allowed)}",
             )
         user.display_currency = cur
     if payload.phone is not None:

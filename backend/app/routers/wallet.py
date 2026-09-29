@@ -25,6 +25,7 @@ from ..payments import get_provider, provider_status
 from ..schemas import DepositIn, SimulateDepositIn, WithdrawalIn, money_field
 from ..security import CurrentUser, Db, audit
 from ..services import payments as pay_svc
+from ..services import wallet as wallet_svc
 from ..services.wallet import balances, ledger_sum_by_account, stats
 
 router = APIRouter(prefix="/api/wallet", tags=["wallet"])
@@ -51,7 +52,29 @@ def summary(user: CurrentUser, db: Db):
 
 @router.get("/statement")
 def statement(user: CurrentUser, db: Db, limit: int = Query(default=100, ge=1, le=500)):
+    """Raw double-entry rows: every leg, for auditing. See /transactions for
+    the player-facing view, which hides internal clearing legs."""
     return {"entries": user_statement(db, user.id, limit)}
+
+
+@router.get("/transactions")
+def transactions(
+    user: CurrentUser,
+    db: Db,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    kind: str | None = Query(default=None, max_length=32),
+):
+    """Paginated money history: settled ledger movement plus in-flight items.
+
+    One endpoint for the dashboard because the alternative - the client
+    merging a ledger page with a deposits page and a withdrawals page - gets
+    the ordering, the pagination and the "is this already in the ledger?"
+    question wrong in three different places.
+    """
+    return wallet_svc.transaction_history(
+        db, user.id, limit=limit, offset=offset, kind=kind
+    )
 
 
 @router.get("/methods")

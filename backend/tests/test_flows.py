@@ -64,19 +64,27 @@ def test_underage_registration_refused(client):
     assert resp.status_code == 403
 
 
-def test_blocked_jurisdiction_refused(client):
-    resp = client.post(
-        "/api/auth/register",
-        json={
-            "email": "us@example.com",
-            "username": "usplayer",
-            "password": "Passw0rd!23",
-            "date_of_birth": "1990-01-01",
-            "country": "US",
-            "accepts_terms": True,
-        },
-    )
-    assert resp.status_code == 403
+def test_registration_is_open_to_every_country_by_default(client):
+    """The shipped policy accepts all countries.
+
+    Jurisdiction is a configurable policy, not a hardcoded list - the modes and
+    their gates are covered in test_jurisdiction.py. What this asserts is the
+    default an operator inherits: open, so a deployment is usable worldwide
+    until somebody decides otherwise.
+    """
+    for index, country in enumerate(("US", "GB", "FR", "NL", "AU", "BT", "IN")):
+        resp = client.post(
+            "/api/auth/register",
+            json={
+                "email": f"open{index}@example.com",
+                "username": f"openuser{index}",
+                "password": "Passw0rd!23",
+                "date_of_birth": "1990-01-01",
+                "country": country,
+                "accepts_terms": True,
+            },
+        )
+        assert resp.status_code == 201, f"{country}: {resp.status_code} {resp.text}"
 
 
 def test_deposit_credited_once_and_visible(client):

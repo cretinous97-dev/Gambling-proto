@@ -55,8 +55,40 @@ class Settings(BaseSettings):
     payment_provider: str = "sandbox"
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
+    # Adyen: the processor most licensed iGaming operators are approved for.
+    adyen_api_key: str = ""
+    adyen_merchant_account: str = ""
+    adyen_hmac_key: str = ""            # webhook HMAC key from the Customer Area
+    adyen_environment: str = "test"     # test | live
+    adyen_balance_account_id: str = ""  # required only for payouts
     cryptopay_api_key: str = ""
     cryptopay_webhook_secret: str = ""
+
+    # --- jurisdiction policy ------------------------------------------------
+    # How the platform decides which countries may register, play and move
+    # money. This is a POLICY switch, not a safety mechanism:
+    #
+    #   allow_all  -> every country is accepted (the default here)
+    #   blocklist  -> every country except JURISDICTION_BLOCKLIST
+    #   allowlist  -> only the countries in JURISDICTION_ALLOWLIST
+    #
+    # RESTRICTED_REGIONS is a middle tier for markets where you want accounts
+    # and gameplay but not payment rails: registration and play are allowed,
+    # deposits and withdrawals are refused with a specific message.
+    #
+    # Whatever you set here, you are the operator: the licence you hold, and
+    # the market you accept players from, are your decisions and your
+    # liability. Player-protection rules (age, KYC, AML flags, limits,
+    # self-exclusion) are enforced separately in services/compliance.py and
+    # are NOT affected by this switch.
+    jurisdiction_mode: str = "allow_all"
+    jurisdiction_blocklist: str = ""            # ISO-3166 alpha-2, comma separated
+    jurisdiction_allowlist: str = ""            # used when mode = allowlist
+    restricted_regions: str = ""                # accounts yes, payment rails no
+    # Trust the CDN's country header (see services/geo.py) as the caller's
+    # region. Off by default: with allow_all it changes nothing, and an
+    # operator who turns on geo-blocking should confirm their edge sets it.
+    geo_enforcement: bool = False
 
     # --- compliance / risk --------------------------------------------------
     house_edge_default: float = 0.01             # 1% theoretical edge
@@ -70,7 +102,26 @@ class Settings(BaseSettings):
     default_wager_requirement_x: float = 1.0     # rollover on deposits w/ bonus
     kyc_required_above_usd: float = 1_000.0      # lifetime withdrawals
     self_exclusion_gate: bool = True
-    jurisdiction_blocklist: str = "US,GB,FR,NL,AU"  # ISO-2, comma separated
+
+    # --- localization -------------------------------------------------------
+    # Localization is a DISPLAY concern here. The ledger keeps one settlement
+    # currency (USD, integer cents) and every balance, bet and limit is stored
+    # and enforced in it. These settings decide how amounts are presented and
+    # in what language; see app/i18n.py for the reasoning.
+    default_locale: str = "en"
+    supported_locales: str = "en,es,pt,de,fr,it,zh,hi,ar"   # comma separated
+    settlement_currency: str = "USD"
+    # Display currencies offered to players, comma separated. An empty value
+    # falls back to every currency the FX table below knows about.
+    display_currencies: str = ""
+    # FX rates relative to the settlement currency, as JSON:
+    #   FX_RATES={"EUR": 0.92, "GBP": 0.79, "INR": 83.4}
+    # These are PRESENTATION rates. They are not used to value a bet, settle a
+    # ledger entry, price a payout or enforce a limit - see app/i18n.py. Wire
+    # them to your treasury feed (ADMIN: GET/PUT /api/admin/fx-rates) before
+    # showing real customers a foreign-currency figure.
+    fx_rates: str = ""
+    fx_rates_updated_at: str = ""
 
     # --- bonus / VIP --------------------------------------------------------
     signup_bonus_usd: float = 0.0
@@ -131,7 +182,23 @@ class Settings(BaseSettings):
 
     @property
     def blocklist(self) -> set[str]:
+        """Retained for callers that only need the set; see services/jurisdiction."""
         return {c.strip().upper() for c in self.jurisdiction_blocklist.split(",") if c.strip()}
+
+    @property
+    def allowlist(self) -> set[str]:
+        return {c.strip().upper() for c in self.jurisdiction_allowlist.split(",") if c.strip()}
+
+    @property
+    def restricted(self) -> set[str]:
+        return {c.strip().upper() for c in self.restricted_regions.split(",") if c.strip()}
+
+    @property
+    def locales(self) -> list[str]:
+        listed = [loc.strip().lower() for loc in self.supported_locales.split(",") if loc.strip()]
+        if self.default_locale.lower() not in listed:
+            listed.insert(0, self.default_locale.lower())
+        return listed
 
     @property
     def cors_list(self) -> list[str]:

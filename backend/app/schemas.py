@@ -68,6 +68,12 @@ class ProfileUpdateIn(BaseModel):
     phone: str | None = Field(default=None, max_length=32)
 
 
+class FxRatesIn(BaseModel):
+    """Display rates, settlement currency = 1.0. See app/i18n.py."""
+
+    rates: dict[str, float] = Field(default_factory=dict, max_length=200)
+
+
 class ResponsibleGamblingIn(BaseModel):
     """Limits can be tightened instantly. Raising them is deliberately
     restricted to a future effective date by the router (cooling-off rule)."""

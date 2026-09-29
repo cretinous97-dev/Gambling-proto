@@ -6,7 +6,10 @@ exists in two places.
 
 Rules enforced:
   * Self-exclusion / cool-off  -> no bets, no deposits, ever, until it expires.
-  * Jurisdiction blocklist     -> registration and deposits blocked.
+  * Jurisdiction policy        -> delegated to services/jurisdiction.py, which
+                                  decides per country and per action. The
+                                  default accepts every country; the tiers and
+                                  what they gate are documented there.
   * Daily deposit limit        -> per-player, rolling UTC day.
   * Daily loss limit           -> net losses per UTC day.
   * KYC before withdrawal      -> required once lifetime withdrawals exceed
@@ -22,6 +25,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from . import jurisdiction
 from ..models import (
     Deposit,
     DepositStatus,
@@ -91,11 +95,7 @@ def assert_can_deposit(db: Session, user: User, amount: int) -> None:
     assert_not_excluded(user)
     if user.is_banned:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account suspended.")
-    if user.country.upper() in settings.blocklist:
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            f"Deposits are not available in {user.country.upper()}.",
-        )
+    jurisdiction.assert_allowed(user.country, jurisdiction.DEPOSIT)
     limit = user.deposit_limit_daily
     if limit:
         used = usage_row(db, user.id).deposit_total
@@ -111,6 +111,7 @@ def assert_can_bet(db: Session, user: User, stake: int) -> None:
     assert_not_excluded(user)
     if user.is_banned:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account suspended.")
+    jurisdiction.assert_allowed(user.country, jurisdiction.PLAY)
     limit = user.loss_limit_daily
     if limit:
         row = usage_row(db, user.id)
@@ -136,6 +137,7 @@ def assert_can_withdraw(db: Session, user: User, amount: int) -> None:
     assert_not_excluded(user)
     if user.is_banned:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account suspended.")
+    jurisdiction.assert_allowed(user.country, jurisdiction.WITHDRAW)
     if not user.email_verified:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, "Verify your email address before withdrawing."

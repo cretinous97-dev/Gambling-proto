@@ -19,7 +19,15 @@ from .config import settings
 
 log = logging.getLogger("security")
 from .db import get_db
-from .models import AppSetting, RefreshToken, SessionAudit, User, UserRole, utcnow
+from .models import (
+    AppSetting,
+    AuditLog,
+    RefreshToken,
+    SessionAudit,
+    User,
+    UserRole,
+    utcnow,
+)
 
 ACCESS = "access"
 REFRESH = "refresh"
@@ -249,13 +257,57 @@ def audit(
     request: Request | None = None,
     meta: dict | None = None,
 ) -> None:
+    """Record one action, in both views of the audit trail.
+
+    There are two tables because they answer two different questions, and an
+    operator needs both:
+
+    * ``audit_log`` - *what* changed, by whom, from what to what. This is the
+      table compliance reads (`GET /api/admin/audit`) and the one an auditor
+      asks for.
+    * ``session_audit`` - *where* it happened: IP, user agent, session
+      metadata. This is the security table (`GET /api/admin/sessions`).
+
+    Writing to one and reading the other is how an audit trail becomes a
+    single table with an empty half: every auth event, withdrawal request and
+    rate change was recorded in ``session_audit`` and invisible in the
+    compliance view. One function writes both, so they cannot drift.
+    """
+    meta = meta or {}
+
+    actor_email = None
+    if user_id:
+        actor_email = db.execute(
+            select(User.email).where(User.id == user_id)
+        ).scalar_one_or_none()
+
+    # `target` is what the action was done *to*, which is not always the actor.
+    target = (
+        meta.get("target")
+        or meta.get("user_id")
+        or meta.get("reference")
+        or meta.get("withdrawal_id")
+        or meta.get("deposit_id")
+        or ""
+    )
+
+    db.add(
+        AuditLog(
+            actor_id=user_id,
+            actor_email=actor_email,
+            action=action,
+            target=str(target)[:64] or None,
+            before=meta.get("before") or {},
+            after=meta.get("after") or meta,
+        )
+    )
     db.add(
         SessionAudit(
             user_id=user_id,
             action=action,
             ip=client_ip(request) if request else None,
             user_agent=(request.headers.get("user-agent") if request else None),
-            meta=meta or {},
+            meta=meta,
         )
     )
 

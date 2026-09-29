@@ -17,6 +17,7 @@ from datetime import timedelta
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import case, func, select, text
 
+from .. import i18n
 from ..config import settings
 from ..ledger import Entry, admin_adjust, global_balance_check
 from ..models import (
@@ -39,6 +40,7 @@ from ..models import (
 from ..money import to_minor
 from ..payments import provider_status
 from ..schemas import (
+    FxRatesIn,
     AdminAdjustIn,
     BonusCodeIn,
     BonusCreateIn,
@@ -185,6 +187,64 @@ def revenue(admin: AdminUser, db: Db, days: int = Query(default=14, ge=1, le=90)
             for day, wagered, returned, bets, players in rows
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# localization / FX
+# ---------------------------------------------------------------------------
+@router.get("/fx-rates")
+def get_fx_rates(admin: AdminUser):
+    """The display-rate table currently in force, and where it came from.
+
+    These rates are presentation only - they never value a bet, settle an
+    entry or enforce a limit. That is exactly why they are editable here
+    without a code change: a stale figure is a customer-service problem, not an
+    accounting one.
+    """
+    return i18n.snapshot()["fx"] | {
+        "currencies": [
+            {"code": code, **i18n.currency_meta(code)}
+            for code in i18n.available_currencies()
+        ]
+    }
+
+
+@router.put("/fx-rates")
+def put_fx_rates(
+    payload: FxRatesIn,
+    admin: AdminUser,
+    db: Db,
+    request: Request = None,
+):
+    """Replace the display rates (audited).
+
+    Rejects the shapes that silently corrupt a display: a non-positive rate, a
+    currency we have no metadata for, and any attempt to re-rate the settlement
+    currency itself - a currency cannot be worth something other than 1 of
+    itself, and allowing it would let a typo make every balance wrong.
+    """
+    settlement = settings.settlement_currency.upper()
+    cleaned: dict[str, float] = {}
+    for code, rate in payload.rates.items():
+        code = code.strip().upper()
+        if code == settlement:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"{settlement} is the settlement currency and is always 1.0",
+            )
+        if code not in i18n.CURRENCIES:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"Unknown currency code {code!r}"
+            )
+        if rate <= 0:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, f"Rate for {code} must be greater than zero"
+            )
+        cleaned[code] = float(rate)
+
+    i18n.set_rates(cleaned, updated_at=utcnow().isoformat(timespec="seconds"))
+    audit(db, admin.id, "fx.rates_update", request, {"currencies": sorted(cleaned)})
+    return {"updated": sorted(cleaned), "fx": i18n.snapshot()["fx"]}
 
 
 @router.get("/health")

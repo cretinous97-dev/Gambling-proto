@@ -45,7 +45,27 @@ def db():
         yield session
 
 
-def register(client: TestClient, email: str, username: str, password="Passw0rd!23") -> dict:
+@pytest.fixture
+def admin_headers(client) -> dict:
+    """Sign in as the seeded operator. Admin actions are the ones that move
+    money out, so tests should exercise the real login, not a forged token."""
+    from app.config import settings
+
+    resp = client.post(
+        "/api/auth/login",
+        json={"email": settings.admin_email, "password": settings.admin_password},
+    )
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
+def register(
+    client: TestClient,
+    email: str,
+    username: str,
+    password="Passw0rd!23",
+    country: str = "BT",
+) -> dict:
     resp = client.post(
         "/api/auth/register",
         json={
@@ -53,7 +73,7 @@ def register(client: TestClient, email: str, username: str, password="Passw0rd!2
             "username": username,
             "password": password,
             "date_of_birth": "1995-04-12",
-            "country": "BT",
+            "country": country,
             "accepts_terms": True,
         },
     )

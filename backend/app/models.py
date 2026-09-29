@@ -327,6 +327,11 @@ class Withdrawal(Base):
     destination: Mapped[str] = mapped_column(String(255))   # masked wallet/IBAN
     provider: Mapped[str] = mapped_column(String(32), default="sandbox")
     provider_ref: Mapped[str | None] = mapped_column(String(128), index=True)
+    # The provider's *payout instrument* id (Adyen transferInstrumentId, Stripe
+    # connected-account bank account token...). `destination` above is the
+    # masked string shown to staff; this is the token actually used to move
+    # money, and it must be a verified instrument - never free text from a form.
+    payout_ref: Mapped[str | None] = mapped_column(String(191))
     status: Mapped[WithdrawalStatus] = mapped_column(
         Enum(WithdrawalStatus), default=WithdrawalStatus.requested, index=True
     )
