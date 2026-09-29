@@ -101,6 +101,10 @@ The software is built, tested and runnable. **These are the things only you can
 do**, roughly in the order you should do them. Nothing in this list is optional
 if real players and real money are involved.
 
+> **Going live?** [`DEPLOY-CHECKLIST.md`](DEPLOY-CHECKLIST.md) is the actionable
+> version: exactly which credentials are needed, where to put them, how to keep
+> them out of a chat log, and the order to do things in.
+
 ### 1. Licensing and legal — do this first
 
 - [ ] **Get a gambling licence** in the jurisdiction you intend to operate from
