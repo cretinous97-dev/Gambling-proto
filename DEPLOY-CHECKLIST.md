@@ -73,23 +73,36 @@ takes days to weeks.
 **The hard part first:** most providers will not process gambling. Open an
 account with one that will, or with your existing acquirer:
 
-| Provider | What you get from them | What I need (in Vercel, not here) |
+| Provider | What they give you | Where it goes (your environment, never in the repo) |
 |---|---|---|
+| Adyen | API key, merchant account, webhook HMAC key, balance account id for payouts | `ADYEN_API_KEY`, `ADYEN_MERCHANT_ACCOUNT`, `ADYEN_HMAC_KEY`, `ADYEN_BALANCE_ACCOUNT_ID`, `ADYEN_ENVIRONMENT` |
 | Stripe (gambling programme) | secret key, webhook signing secret | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
 | Crypto processor (e.g. Coinbase Commerce, NowPayments, Cryptomus) | API key, webhook secret | `CRYPTOPAY_API_KEY`, `CRYPTOPAY_WEBHOOK_SECRET` |
-| Your acquirer / PSP | API docs — I may need to write an adapter | send me the docs link |
+| A different acquirer | API docs | the adapter interface is in `backend/app/payments/base.py`; a new provider is one file plus one line in the registry |
+
+Adyen is the one to reach for first if you need cards, local payment methods
+and payouts from one account: it is a gambling-friendly acquirer, and the
+adapter already implements the documented HMAC webhook scheme and the Transfers
+API payout shape.
 
 Also needed:
 
 - **Your webhook URL**, registered with the provider:
-  `https://your-app.vercel.app/api/wallet/webhooks/{provider}`. The app rejects
-  unsigned callbacks, so the signing secret must match.
-- **A payout destination**: for crypto, the wallet address you will pay out
-  from; for cards, your merchant account.
+  `https://your-app.vercel.app/api/payments/webhooks/{provider}` — where
+  `{provider}` is `adyen`, `stripe` or `cryptopay`. The legacy
+  `/api/wallet/webhooks/{provider}` path still works and is reported by
+  `GET /api/payments/config` along with the URL to register. The app rejects
+  unsigned callbacks, so the signing secret must match or every deposit will
+  stay `requires_action`.
+- **`APP_BASE_URL`** set to the real public origin. Adyen sends the shopper
+  back to `{APP_BASE_URL}/checkout/{id}` after a 3DS challenge; if this is still
+  `localhost`, the player finishes the payment on a page that cannot load.
+- **A payout destination**: for crypto, the wallet address you pay out from;
+  for cards, your merchant account and a payout instrument per player.
 
-Then flip `PAYMENT_PROVIDER` from `sandbox` to `stripe` or `cryptopay`. The
-simulate buttons disappear automatically (the endpoint returns 403), and the
-"sandbox" banner clears.
+Then flip `PAYMENT_PROVIDER` from `sandbox` to `adyen`, `stripe` or `cryptopay`.
+The simulate buttons disappear automatically (the endpoint returns 403), and
+the "sandbox" banner clears.
 
 ### Group D — to pass even a light touch of scrutiny
 
