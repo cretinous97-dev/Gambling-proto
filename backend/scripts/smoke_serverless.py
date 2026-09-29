@@ -54,9 +54,31 @@ def check(label: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
+VERCEL_JSON = ROOT / "vercel.json"
+
+
+def entry_point_path() -> Path:
+    """The function file, taken from the deployed config rather than hardcoded.
+
+    A bracketed catch-all filename (``api/[...path].py``) compiles to a route
+    matching a single path segment on Vercel, so every /api/a/b request 404'd at
+    the edge before the function ran. Reading the name out of vercel.json means
+    this harness tests whatever is actually deployed, and fails loudly if the
+    two ever drift apart again.
+    """
+    config = json.loads(VERCEL_JSON.read_text())
+    keys = list(config.get("functions", {}))
+    assert keys, "vercel.json declares no functions block"
+    return ROOT / keys[0]
+
+
 def load_vercel_entry():
-    """Import the deployed entry point by path - the filename is a catch-all."""
-    entry = ROOT / "api" / "[...path].py"
+    """Import the deployed entry point by path."""
+    entry = entry_point_path()
+    assert entry.is_file(), f"vercel.json points at {entry} which does not exist"
+    assert "[" not in entry.name, (
+        "bracketed catch-all filenames only match a single path segment on Vercel"
+    )
     spec = importlib.util.spec_from_file_location("vercel_entry", entry)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -79,7 +101,8 @@ check("background loops are disabled", settings.serverless is True)
 
 # Load the app through the real Vercel entry point.
 asgi_app = load_vercel_entry()
-check("api/[...path].py exports an ASGI app", callable(asgi_app))
+check(f"{entry_point_path().relative_to(ROOT)} exports an ASGI app",
+      callable(asgi_app))
 
 # Shorten the crash phases so the test does not sit here for 12 seconds.
 from app.services import crash_loop  # noqa: E402
@@ -284,6 +307,20 @@ def resolve(path: str, rules: list[dict]) -> tuple[str, str | None]:
     return path, None
 
 
+async def _fetch_public(url: str) -> tuple[int, str, str]:
+    """Read a file straight out of the static output, as Vercel would."""
+    dist = ROOT / "public"
+    relative = url.split("?", 1)[0].lstrip("/")
+    target = (dist / relative) if relative else (dist / "index.html")
+    if not target.is_file():
+        return 404, "", ""
+    suffix = target.suffix.lower()
+    ctype = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+             ".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg",
+             ".ico": "image/x-icon"}.get(suffix, "application/octet-stream")
+    return 200, ctype, target.read_text(errors="ignore")[:200] if suffix == ".html" else ""
+
+
 async def _fetch(final_path: str) -> tuple[int, str, str]:
     transport = httpx.ASGITransport(app=asgi_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
@@ -292,12 +329,39 @@ async def _fetch(final_path: str) -> tuple[int, str, str]:
 
 
 def vercel_routing_section() -> None:
+    """Resolve URLs the way Vercel does, including the parts that hid the bug.
+
+    Two platform behaviours matter and both are modelled here:
+
+      * static files take precedence over rewrites, which is why the site looked
+        fine while every API call 404'd - index.html and the assets were served
+        straight off disk and never touched the function
+      * a rewrite hands the function its DESTINATION path, so the rewrite must
+        carry the original in a query parameter; the entry point reads it back
+    """
     config = json.loads(VERCEL_JSON.read_text())
     rules = config.get("rewrites", [])
+    dist = ROOT / "public" if (ROOT / "public" / "index.html").is_file() else None
+
     print("\n8. every URL the browser uses, resolved through vercel.json")
 
+    def static_hit(url: str) -> bool:
+        """Would the platform serve this from disk before rewrites run?"""
+        if dist is None:
+            return False
+        relative = url.split("?", 1)[0].lstrip("/")
+        target = (dist / relative) if relative else (dist / "index.html")
+        return target.is_file()
+
     def check_url(url: str, expect_status: int, expect_in: str | None = None,
-                  label: str | None = None) -> None:
+                  label: str | None = None, must_reach_function: bool = True) -> None:
+        if static_hit(url):
+            note = " (served statically, no function call)"
+            status, ctype, body = asyncio.run(_fetch_public(url))
+            ok = status == expect_status
+            check(label or url, ok, f"{url} [{status}] {ctype.split(';')[0]}{note}")
+            return
+
         final, matched = resolve(url, rules)
         if matched is None:
             check(label or url, False,
@@ -307,44 +371,56 @@ def vercel_routing_section() -> None:
         ok = status == expect_status and (not expect_in or expect_in in body or expect_in in ctype)
         check(label or url, ok, f"{url} -> {final} [{status}] {ctype.split(';')[0]}")
 
-    # the root URL is the one that was broken in production
-    check_url("/", 200, "text/html", label="/ (the URL that returned 404)")
+    # ---- the URLs that were broken in production -------------------------
+    check_url("/api/health", 200, '"status"', label="/api/health")
+    check_url("/api/auth/register", 405, None,
+              label="/api/auth/register (GET: reached the API, method not allowed)")
+    check_url("/api/wallet/summary", 401, None,
+              label="/api/wallet/summary (reached the API, auth required)")
+    check_url("/api/games/catalog", 200, None, label="/api/games/catalog")
+    check_url("/api/admin/dashboard", 401, None,
+              label="/api/admin/dashboard (reached the API)")
+    check_url("/api/crash/state", 200, None, label="/api/crash/state")
+    check_url("/api/auth/seeds/rotate", 405, None,
+              label="/api/auth/seeds/rotate (three segments deep)")
+    check_url("/api/games/history/abc", 401, None,
+              label="/api/games/history/:id (four segments deep)")
+
+    # ---- pages ----------------------------------------------------------
     for route in ("/login", "/register", "/wallet", "/account", "/history",
                   "/leaderboard", "/promotions", "/crash", "/admin"):
         check_url(route, 200, "text/html", label=f"{route} (client-side route)")
     check_url("/game/slots", 200, "text/html", label="/game/:slug")
     check_url("/legal/terms", 200, "text/html", label="/legal/:doc")
-    check_url("/checkout/abc123", 200, "text/html", label="/checkout/:id")
     check_url("/admin/users", 200, "text/html", label="/admin/* nested")
+    check_url("/some/typo/path", 200, "text/html",
+              label="/some/typo/path (the app's own 404 page)")
 
-    dist = ROOT / "frontend" / "dist"
-    if (dist / "assets").is_dir():
+    if dist is not None:
+        check_url("/", 200, "text/html", label="/ (the URL that returned 404)")
         for pattern in ("*.js", "*.css"):
             asset = next((dist / "assets").glob(pattern), None)
             if asset:
                 check_url(f"/assets/{asset.name}", 200,
-                          label=f"/assets/{asset.name[:20]}... (hashed, immutable)")
-    check_url("/brand/logo.webp", 200, label="/brand/logo.webp")
-    check_url("/games/dice.webp", 200, label="/games/dice.webp")
+                          label=f"/assets/{asset.name[:20]}... (hashed)")
+        check_url("/brand/logo.webp", 200, label="/brand/logo.webp")
+        check_url("/games/dice.webp", 200, label="/games/dice.webp")
 
-    # The API must not be shadowed by any of this. /api/* reaches the function
-    # through the filesystem, not a rewrite, so the correct result here is
-    # "no rule matched" - plus a direct call proving the endpoint still answers.
-    api_final, api_matched = resolve("/api/health", rules)
-    check("no rewrite swallows the API", api_matched is None,
-          "/api/* is routed to the function by the filesystem, as intended")
-    status, _, body = asyncio.run(_fetch("/api/health"))
-    check("/api/health still answers", status == 200 and '"status"' in body,
-          f"http {status}")
+    # ---- the rewrite must carry the path, or the app sees /api/index ----
+    for url in ("/api/auth/register", "/api/wallet/deposits/abc/simulate", "/crash"):
+        final, matched = resolve(url, rules)
+        check(f"the rewrite carries the original path for {url}",
+              "__path=" in final,
+              f"{url} -> {final}")
 
-    # a missing asset is a real 404, not index.html pretending to be one
-    final, _ = resolve("/assets/does-not-exist.js", rules)
+    # ---- a missing asset is a real 404, not a fake 200 ------------------
+    final, _ = resolve("/api/site/assets/does-not-exist.js", rules)
     status, _, _ = asyncio.run(_fetch(final))
     check("a missing asset returns 404, not a fake 200", status == 404, f"http {status}")
 
-    # traversal must never escape the bundle
-    for attack in ("/assets/../../../../etc/passwd",
-                   "/api/site/../../../../etc/passwd"):
+    # ---- traversal must never escape the bundle ------------------------
+    for attack in ("/api/site/../../../../etc/passwd",
+                   "/api/index?__path=/../../../../etc/passwd"):
         final, _ = resolve(attack, rules)
         status, _, body = asyncio.run(_fetch(final))
         check(f"traversal blocked: {attack[:30]}", "root:" not in body, f"http {status}")

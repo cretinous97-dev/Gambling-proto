@@ -135,6 +135,23 @@ In Vercel → Settings → Environment Variables, add `SECRET_KEY`,
 Check: the lobby shows generated artwork; register; deposit; press
 **Simulate success**; play; withdraw; approve as admin.
 
+#### Four failures you have already seen, and why they are fixed
+
+Each of these was a real error message from your deployment, fixed at the cause.
+
+| What Vercel said | What was actually wrong | The fix |
+|---|---|---|
+| `404 NOT_FOUND` at the root URL | the site depended on platform static hosting, and one of the output-directory / SPA-rewrite / root-directory settings did not line up | every route is rewritten to the application, which serves the built site itself |
+| `functions.api/[...path].py.includeFiles should be string` | the schema requires a single string, not an array | `includeFiles: "backend/**"` |
+| `No Output Directory named "public" found` | Vercel uses `outputDirectory || "public"`, and the build only produced `frontend/dist` | one build script writes `public/`, `frontend/dist/` **and** `backend/static/` |
+| signup returned Vercel's 404 page | **`api/[...path].py` only matches ONE segment after `/api`.** `/api/health` reached Python; `/api/auth/register` 404'd at Vercel's edge before the function ran — so login and signup were the two visibly broken things | plain `api/index.py` + a rewrite that carries the original path: `/api/index?__path=/api/$1` |
+
+The fourth one is worth understanding rather than trusting: no test *inside* the
+application could have caught it, because the request never arrived. That is why
+`make smoke-serverless` now resolves real URLs through the real `vercel.json`,
+including the platform rule that static files are served before rewrites — the
+reason the site looked fine while every API call failed.
+
 ### Step 2 — make it persistent (5 minutes)
 
 Do Group B above. Re-check `/api/health` for `balances_persist: true`.

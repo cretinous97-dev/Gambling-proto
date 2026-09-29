@@ -20,7 +20,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from starlette.routing import Match
 
 from .config import settings
 from .db import init_db, session_scope
@@ -330,37 +330,93 @@ async def site(asset_path: str = ""):
 
 
 # ---------------------------------------------------------------------------
-# SPA hosting for a normal server: active once `npm run build` has produced
-# frontend/dist. Serverless deployments use the /api/site routes above, which
-# do not depend on the platform's static file configuration.
+# Single-page app hosting
 # ---------------------------------------------------------------------------
-if FRONTEND_DIST.is_dir():
-    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+# Registered unconditionally and resolved lazily. On a serverless deployment
+# the built site is bundled at backend/static, so a check performed at import
+# time (before the bundle is found) would silently leave the SPA unmounted and
+# every page URL returning a JSON 404.
+SPA_ROUTE_PATH = "/{full_path:path}"
 
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def spa(full_path: str):
-        # An unknown /api/... path must NOT fall through to the single-page app:
-        # returning index.html for a mistyped endpoint gives the client a JSON
-        # parse error instead of a 404 that says what went wrong.
-        if full_path.startswith("api/"):
+
+def other_methods_for(request, path: str) -> set[str]:
+    """Methods that a real API route accepts for this path.
+
+    This catch-all matches ANY path for GET, and a full match wins over the
+    partial match a wrong-method request produces - so without this check a
+    ``GET /api/auth/register`` would report "no such endpoint" instead of 405
+    Method Not Allowed, which is both wrong and unhelpful to anyone debugging
+    an integration.
+    """
+    probe = {
+        "type": "http",
+        "path": path,
+        "method": request.scope.get("method", "GET"),
+        "root_path": "",
+        "scheme": "http",
+        "query_string": b"",
+        "headers": [],
+    }
+    allowed: set[str] = set()
+    for route in request.app.router.routes:
+        # Only the fallback itself is skipped: a route whose path equals the
+        # requested path is exactly the wrong-method route being looked for.
+        if getattr(route, "path", None) == SPA_ROUTE_PATH:
+            continue
+        try:
+            match, _ = route.matches(probe)
+        except Exception:
+            continue
+        if match == Match.PARTIAL:
+            allowed.update(getattr(route, "methods", None) or ())
+    return allowed
+
+
+@app.get("/", include_in_schema=False)
+@app.get(SPA_ROUTE_PATH, include_in_schema=False)
+async def spa(request: Request, full_path: str = ""):
+    """Serve the built single-page app for any non-API path."""
+    # An unknown /api/... path must NOT fall through to the app: returning
+    # index.html for a mistyped endpoint gives the client a JSON parse error
+    # instead of a 404 that says what went wrong.
+    if full_path.startswith("api/"):
+        other = other_methods_for(request, "/" + full_path)
+        if other:
             return JSONResponse(
-                status_code=404,
-                content={"detail": f"No such endpoint: /{full_path}"},
+                status_code=405,
+                content={"detail": f"{request.method} is not allowed on /{full_path}"},
+                headers={"Allow": ", ".join(sorted(other))},
             )
-        candidate = FRONTEND_DIST / full_path
-        if full_path and candidate.is_file():
-            return FileResponse(candidate)
-        # Never let the browser cache index.html: it points at hashed assets
-        # that change on every deploy.
-        return FileResponse(
-            FRONTEND_DIST / "index.html", headers={"Cache-Control": "no-store"}
+        return JSONResponse(
+            status_code=404, content={"detail": f"No such endpoint: /{full_path}"}
         )
-else:
 
-    @app.get("/", include_in_schema=False)
-    def root():
-        return {
-            "message": f"{settings.app_name} API is running.",
-            "docs": "/docs",
-            "hint": "Build the frontend (cd frontend && npm run build) or use the Vite dev server.",
-        }
+    dist = frontend_dist()
+    if dist is None:
+        if full_path:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f"Not found: /{full_path}")
+        return JSONResponse(
+            {
+                "message": f"{settings.app_name} API is running.",
+                "docs": "/docs",
+                "hint": (
+                    "The API is healthy but no built frontend was found. Run "
+                    "`make build` locally, or check the deployment's build step."
+                ),
+                "frontend_bundle": "missing",
+            }
+        )
+
+    # A real file (favicon, robots.txt, an image) is served directly.
+    if full_path:
+        candidate = (dist / full_path).resolve()
+        root = dist.resolve()
+        if candidate.is_relative_to(root) and candidate.is_file():
+            return FileResponse(
+                candidate,
+                headers={"Cache-Control": _cache_header_for(full_path)},
+            )
+
+    # Otherwise it is a client-side route: hand back index.html. Never let the
+    # browser cache it - it points at hashed assets that change every deploy.
+    return FileResponse(dist / "index.html", headers={"Cache-Control": "no-store"})

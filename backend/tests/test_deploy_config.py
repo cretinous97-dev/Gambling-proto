@@ -18,7 +18,12 @@ BACKEND_REQS = ROOT / "backend" / "requirements.txt"
 ROOT_REQS = ROOT / "requirements.txt"
 VERCEL_JSON = ROOT / "vercel.json"
 VERCEL_IGNORE = ROOT / ".vercelignore"
-ENTRY = ROOT / "api" / "[...path].py"
+VERCEL_FUNCTIONS = json.loads(VERCEL_JSON.read_text())["functions"]
+
+#: The function file, taken from the config rather than hardcoded so the two
+#: cannot drift apart. Deliberately NOT a bracketed catch-all: see
+#: test_the_entry_point_is_not_a_bracketed_catch_all.
+ENTRY = ROOT / next(iter(VERCEL_FUNCTIONS))
 
 #: Fine to differ between the two lists:
 #:   uvicorn - the serverless runtime supplies its own ASGI server
@@ -91,12 +96,148 @@ def test_vercel_json_is_valid_and_complete():
 
 
 def test_entry_point_exists_and_bootstraps_the_application():
-    assert ENTRY.is_file(), "Vercel needs api/[...path].py as the function entry"
+    assert ENTRY.is_file(), f"Vercel needs {ENTRY.name} as the function entry"
     source = ENTRY.read_text()
     assert "from app.main import app" in source
     # it must put backend/ on the path itself rather than relying on cwd
     assert "sys.path.insert" in source
     assert "handler = app" in source, "Vercel looks for an ASGI callable by name"
+
+
+# ---------------------------------------------------------------------------
+# Regression guards for the "every /api/a/b 404'd at the edge" incident
+# ---------------------------------------------------------------------------
+# Vercel compiles the filename `api/[...path].py` into the route
+#
+#     ^/api/([^/]+)$
+#
+# which matches exactly ONE segment after /api. /api/health reached the
+# function; /api/auth/register - the endpoint the signup form posts to -
+# returned the platform's own 404 without ever invoking Python. No Python-side
+# test could have caught it, because the request never got that far.
+#
+# The fix is two interlocking halves, and BOTH are required:
+#   * a plain api/index.py, reached by an explicit rewrite
+#   * a rewrite that carries the original path, because a rewrite hands the
+#     function its destination path, not the one the browser asked for
+# Remove either half and the bug comes back silently.
+
+
+def test_the_entry_point_is_not_a_bracketed_catch_all():
+    """A bracketed filename only ever matches a single path segment."""
+    assert "[" not in ENTRY.name and "]" not in ENTRY.name, (
+        f"{ENTRY.name} is a bracketed catch-all. On Vercel it compiles to a "
+        "route matching one segment after /api, so /api/auth/register and every "
+        "other real endpoint 404s at the edge before the function runs."
+    )
+    assert ENTRY.parent.name == "api", (
+        "the function must live directly in api/, which is where Vercel looks"
+    )
+
+
+def test_multi_segment_api_paths_reach_the_function():
+    """Without this rewrite the platform answers for us."""
+    rewrites = _rewrites()
+    assert rewrites, "no rewrites configured"
+
+    for probe in ("/api/auth/register", "/api/auth/login", "/api/wallet/summary",
+                  "/api/games/play", "/api/admin/users"):
+        matched = [r for r in rewrites if _matches(r["source"], probe)]
+        assert matched, (
+            f"no rewrite matches {probe}, so Vercel serves its own 404 for it"
+        )
+        destination = matched[0]["destination"]
+        target = "/" + ENTRY.relative_to(ROOT).with_suffix("").as_posix()
+        assert destination.startswith(target), (
+            f"the rewrite for {probe} points at {destination!r}, not at the "
+            f"function {target!r}"
+        )
+        # a rewrite hands the function its destination, so the real path has to
+        # be carried, not inferred
+        assert "$1" in destination or ":path" in destination, (
+            f"the rewrite for {probe} discards the original path: it would send "
+            f"{probe} to {destination}, so the function sees {destination} and "
+            "cannot know which endpoint was requested"
+        )
+        assert "?" in destination, (
+            f"the rewrite for {probe} must carry the original path in a query "
+            f"parameter, got {destination!r}"
+        )
+
+
+def test_the_api_rewrite_comes_before_any_page_rewrite():
+    """The first rule that matches wins, so the API rule must be first."""
+    rewrites = _rewrites()
+    api_rules = [i for i, r in enumerate(rewrites)
+                 if _matches(r["source"], "/api/auth/register")]
+    page_rules = [i for i, r in enumerate(rewrites)
+                  if _matches(r["source"], "/wallet")]
+    assert api_rules and page_rules
+    assert api_rules[0] < page_rules[0], (
+        "a page rewrite is matched before the API rewrite, so API calls would be "
+        "served the single-page app instead of JSON"
+    )
+
+
+def test_the_entry_point_reads_the_path_the_rewrite_carries():
+    """The parameter name must agree on both sides."""
+    source = ENTRY.read_text()
+    carried = re.search(r'^PATH_PARAM = "([^"]+)"', source, re.M)
+    assert carried, "the entry point no longer declares the path parameter name"
+    param = carried.group(1)
+
+    for rule in _rewrites():
+        if "$1" in rule["destination"]:
+            assert f"{param}=" in rule["destination"], (
+                f"rewrite {rule['source']} carries the path under a different "
+                f"name than the entry point reads ({param!r})"
+            )
+
+    assert "query_string" in source, "the entry point must read the query string"
+    assert "scope[" in source, "the entry point must rewrite the ASGI scope path"
+    assert 'scope["path"]' in source, "the rewritten path is never applied"
+
+
+def test_the_entry_point_does_not_guess_paths():
+    """Guessing is how page URLs broke.
+
+    An earlier revision prefixed bare paths that "looked like" API calls, which
+    turned /wallet, /crash, /admin and /legal/terms into /api/... and returned a
+    JSON 404 for a link click. The rewrite states the path; nothing is inferred.
+    """
+    source = ENTRY.read_text()
+    for collision in ("wallet", "crash", "admin", "promotions", "legal"):
+        assert f'"{collision}"' not in source, (
+            f"the entry point still special-cases {collision!r}, which collides "
+            "with a page URL of the same name"
+        )
+
+
+def test_the_single_page_app_handler_resolves_its_directory_lazily():
+    """The built site must be looked up per request, not at import time.
+
+    On a serverless deployment the bundle is at backend/static. A check made
+    while the module is imported - before the platform has unpacked anything -
+    would leave the SPA handler unregistered and every page URL returning JSON.
+    """
+    source = (ROOT / "backend" / "app" / "main.py").read_text()
+    assert "def frontend_dist()" in source
+    module_level_guard = re.search(
+        r"^if\s+\w*FRONTEND\w*\.is_dir\(\)", source, re.M
+    )
+    assert module_level_guard is None, (
+        "the SPA handler is registered conditionally at import time; on "
+        "serverless it will not be registered at all"
+    )
+    assert "SPA_ROUTE_PATH" in source, "the single-page-app catch-all is missing"
+
+
+def _matches(source: str, path: str) -> bool:
+    """Does a rewrite source (in Vercel's syntax) match this path?"""
+    pattern = re.sub(r":([A-Za-z_]\w*)\*", r"(?P<\1>[^/]*)", source)
+    pattern = re.sub(r":([A-Za-z_]\w*)", r"(?P<\1>[^/]+)", pattern)
+    pattern = re.sub(r"\((.*?)\)", r"(\1)", pattern)
+    return re.fullmatch(pattern, path) is not None
 
 
 def test_vercelignore_does_not_drop_the_application():
@@ -138,14 +279,14 @@ def test_the_root_url_is_routed_to_the_application():
     project's root directory all had to line up, and one of them did not.
     Routing "/" explicitly removes that dependency.
     """
-    sources = {rule["source"] for rule in _rewrites()}
-    assert "/" in sources, (
+    matched = [r for r in _rewrites() if _matches(r["source"], "/")]
+    assert matched, (
         "the root URL is not rewritten to the application, so it depends on the "
         "platform finding the static build - which is what broke"
     )
 
 
-def test_no_rewrite_uses_a_regular_expression():
+def test_no_rewrite_uses_a_lookahead():
     """Only exact paths and trailing captures - no lookaheads.
 
     Negative lookaheads are the classic way people exclude /api from an SPA
@@ -167,15 +308,13 @@ def test_every_route_in_the_router_is_reachable_on_a_deep_link():
     routes = re.findall(r'<Route\s+path="([^"]+)"', router)
     assert routes, "no routes found in main.jsx - the parser needs updating"
 
-    sources = {rule["source"] for rule in _rewrites()}
-
     def covered(path: str) -> bool:
         if path == "*":
             return True  # unknown paths fall through to the app's own 404 page
-        if ":" in path or path.endswith("/*"):
-            base = path.split("/:")[0].split("/*")[0].rstrip("/")
-            return f"{base}/(.*)" in sources or base in sources
-        return path in sources
+        # a route with parameters (:slug, /*) is covered when a rewrite matches
+        # a concrete URL built from it
+        sample = re.sub(r"/\*$", "/anything", re.sub(r":[A-Za-z_]\w*", "sample", path))
+        return any(_matches(rule["source"], sample) for rule in _rewrites())
 
     missing = [r for r in routes if not covered(r)]
     assert not missing, (

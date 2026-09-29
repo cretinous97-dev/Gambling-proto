@@ -3,87 +3,70 @@
   "installCommand": "cd frontend && npm ci",
   "framework": null,
   "functions": {
-    "api/[...path].py": {
-      "includeFiles": "backend/**",
-      "memory": 1024
+    "api/index.py": {
+      "includeFiles": "backend/**"
     }
   },
   "rewrites": [
     {
-      "source": "/",
-      "destination": "/api/site"
+      "source": "/api/(.*)",
+      "destination": "/api/index?__path=/api/$1"
     },
     {
       "source": "/login",
-      "destination": "/api/site/login"
+      "destination": "/api/index?__path=/login"
     },
     {
       "source": "/register",
-      "destination": "/api/site/register"
+      "destination": "/api/index?__path=/register"
     },
     {
       "source": "/wallet",
-      "destination": "/api/site/wallet"
+      "destination": "/api/index?__path=/wallet"
     },
     {
       "source": "/account",
-      "destination": "/api/site/account"
+      "destination": "/api/index?__path=/account"
     },
     {
       "source": "/history",
-      "destination": "/api/site/history"
+      "destination": "/api/index?__path=/history"
     },
     {
       "source": "/leaderboard",
-      "destination": "/api/site/leaderboard"
+      "destination": "/api/index?__path=/leaderboard"
     },
     {
       "source": "/promotions",
-      "destination": "/api/site/promotions"
+      "destination": "/api/index?__path=/promotions"
     },
     {
       "source": "/crash",
-      "destination": "/api/site/crash"
+      "destination": "/api/index?__path=/crash"
     },
     {
       "source": "/admin",
-      "destination": "/api/site/admin"
+      "destination": "/api/index?__path=/admin"
     },
     {
       "source": "/checkout/(.*)",
-      "destination": "/api/site/checkout/$1"
+      "destination": "/api/index?__path=/checkout/$1"
     },
     {
       "source": "/legal/(.*)",
-      "destination": "/api/site/legal/$1"
+      "destination": "/api/index?__path=/legal/$1"
     },
     {
       "source": "/game/(.*)",
-      "destination": "/api/site/game/$1"
+      "destination": "/api/index?__path=/game/$1"
     },
     {
       "source": "/admin/(.*)",
-      "destination": "/api/site/admin/$1"
+      "destination": "/api/index?__path=/admin/$1"
     },
     {
-      "source": "/assets/(.*)",
-      "destination": "/api/site/assets/$1"
-    },
-    {
-      "source": "/games/(.*)",
-      "destination": "/api/site/games/$1"
-    },
-    {
-      "source": "/brand/(.*)",
-      "destination": "/api/site/brand/$1"
-    },
-    {
-      "source": "/favicon.ico",
-      "destination": "/api/site/favicon.ico"
-    },
-    {
-      "source": "/robots.txt",
-      "destination": "/api/site/robots.txt"
+      "source": "/(.*)",
+      "destination": "/api/index?__path=/$1"
     }
   ],
   "headers": [

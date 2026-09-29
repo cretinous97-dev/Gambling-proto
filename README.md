@@ -382,7 +382,7 @@ Two honest caveats:
 - **I could not run `vercel deploy` for you.** This build environment has no
   access to vercel.com (DNS resolves, connections are refused), so the last step
   has to run from your machine. Everything up to that point is verified: the
-  app is exercised in a Vercel-shaped harness (`make smoke-serverless`, 30
+  app is exercised in a Vercel-shaped harness (`make smoke-serverless`, 60+
   checks) that removes the lifespan, removes the loops and moves the database to
   `/tmp`.
 - **Vercel's terms are worth checking** before you host anything gambling-related
@@ -390,11 +390,40 @@ Two honest caveats:
   real-money operation should confirm the platform permits it, and will need a
   hosting setup with a persistent disk or a managed database regardless.
 
+### How the routing is wired (read this before changing it)
+
+Every request reaches one Python function, and two platform behaviours decide
+whether that works:
+
+1. **A bracketed filename is not a catch-all.** `api/[...path].py` compiles to
+   `^/api/([^/]+)$` — exactly one segment after `/api`. `/api/health` reached
+   Python; `/api/auth/register` (the signup endpoint) never did. The entry point
+   is therefore `api/index.py`, a fixed path.
+2. **A rewrite hands the function its destination, not the browser's URL.** So
+   the rewrite has to carry the original path with it:
+
+   ```
+   /api/auth/register  ->  /api/index?__path=/api/auth/register
+   /wallet             ->  /api/index?__path=/wallet
+   ```
+
+   The entry point reads `__path`, deletes it from the query string so the app
+   sees exactly what the browser sent, and rewrites the ASGI scope.
+
+Rules in `vercel.json` are evaluated in order, so the API rule is first, then
+the page rules, then a catch-all: static files win over rewrites, so the built
+site and its assets are still served from `public/` without invoking the
+function at all. Six tests plus 30 routing checks in `make smoke-serverless`
+resolve real URLs through the real `vercel.json`, static-file precedence
+included, so this cannot silently regress.
+
 ### If something goes wrong after deploying
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Every `/api/...` returns 404 | the platform rewrote the function's path and dropped the original | the entry point already tries to recover it from proxy headers; if it cannot, tell me and we switch to an explicit rewrite |
+| `/api/health` works but every deeper API path 404s | the function file is a **bracketed catch-all** (`api/[...path].py`), which Vercel compiles to a route matching one segment after `/api`; a higher-level push re-introduced the filename | the file must be `api/index.py`, reached by the `/api/(.*)` rewrite in `vercel.json`. `test_the_entry_point_is_not_a_bracketed_catch_all` and the routing section of `make smoke-serverless` both fail if it comes back |
+| Every `/api/...` returns the platform's 404 | the rewrite dropped the original path (a rewrite hands the function its *destination*) | the rewrite must carry it: `/api/index?__path=/api/$1`. `test_multi_segment_api_paths_reach_the_function` enforces this |
+| Page links return JSON instead of the page | something started prefixing page URLs with `/api/`, usually a "looks like an API call" heuristic | `test_the_entry_point_does_not_guess_paths` — the entry point must never infer a path; the rewrite states it |
 | "Invalid session" after a while | `SECRET_KEY` is not set, so each cold start mints a new one | set `SECRET_KEY` in the project environment |
 | Balances reset between visits | the database is the `/tmp` SQLite file | set `DATABASE_URL` to a Postgres URL |
 | Crash page shows "Betting closed" but never runs | you are reading a cached response | check `GET /api/health` reports `deployment.background_loops` correctly; the browser sets `no-store` on API calls |
@@ -446,7 +475,7 @@ full annotated list. The safety-relevant defaults:
 ## Testing
 
 ```bash
-make test                                   # 81 tests
+make test                                   # 103 tests
 ```
 
 - `test_ledger.py` — double-entry invariants, zero-sum, insufficient funds
@@ -455,11 +484,14 @@ make test                                   # 81 tests
 - `test_game_math.py` — statistical RTP checks for every game
 - `test_slots_exact.py` — **exact** slot RTP: closed form vs. brute-force
   enumeration of all 10⁵ symbol sequences, plus line-grader regression cases
-- `test_deploy_config.py` — the deploy cannot drift from what was tested
-  (requirements parity, Vercel config, entry point, ignore rules)
+- `test_deploy_config.py` — the deploy cannot drift from what was tested:
+  requirements parity, Vercel config schema, the ignore rules, and the routing
+  contract (a plain entry point, a rewrite that carries the original path, and
+  no path guessing)
 
 ```bash
 make smoke                                  # 50 checks against a running server
+make smoke-serverless                        # 64 checks against the Vercel shape
 ```
 
 ---
