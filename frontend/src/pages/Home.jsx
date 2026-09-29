@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api.js'
-import { fmtCents, fmtMultiplier, fmtRelative } from '../lib/format.js'
-import { Card, Stat, Loading, Empty } from '../components/ui.jsx'
+import { fmtCents, fmtMultiplier } from '../lib/format.js'
+import { Card, Loading, Empty } from '../components/ui.jsx'
 import GameArt from '../components/GameArt.jsx'
 import { useStore } from '../lib/store.jsx'
 

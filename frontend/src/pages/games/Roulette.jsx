@@ -6,11 +6,6 @@ import { ResultBanner, ProvablyFairNote } from '../GameRoom.jsx'
 import { fmtCents } from '../../lib/format.js'
 
 const RED = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]
-const PAYS = {
-  straight: 36, split: 18, street: 12, corner: 9, line: 6,
-  column: 3, dozen: 3, red: 2, black: 2, odd: 2, even: 2, low: 2, high: 2,
-}
-
 const OUTSIDE = [
   { kind: 'red', label: 'Red', colour: '#c0364b' },
   { kind: 'black', label: 'Black', colour: '#22283d' },
@@ -32,7 +27,6 @@ const OUTSIDE = [
  * validates that the leg stakes sum to the total wager.
  */
 export default function Roulette({ minBet, maxBet, onSettled }) {
-  const [stake, setStake] = useState('1.00')
   const [legs, setLegs] = useState({})   // key -> { kind, stake, ...coverage }
   const [chip, setChip] = useState('1.00')
   const [bet, setBet] = useState(null)

@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { useStore } from '../lib/store.jsx'
 import { Alert, Card } from '../components/ui.jsx'
-import { fmtCents } from '../lib/format.js'
-
-const COUNTRIES = ['BT', 'IN', 'NP', 'SG', 'AE', 'ZA', 'TH', 'PH', 'MY', 'KE', 'BR']
+import { countryOptions } from '../lib/countries.js'
 
 export default function Register() {
+  const { t, i18n } = useTranslation()
   const { register, toast, config } = useStore()
   const navigate = useNavigate()
   const [form, setForm] = useState({
@@ -15,6 +15,15 @@ export default function Register() {
   })
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+
+  // Every country, named in the player's language, sorted by that name.
+  // The operator's accepted markets are a server-side policy, so the form
+  // offers the world and the API is the thing that says no - a form that
+  // quietly hides countries would be a second, stale copy of that policy.
+  const countries = useMemo(
+    () => countryOptions(i18n.language, [form.country, config?.region?.country]),
+    [i18n.language, form.country, config?.region?.country],
+  )
 
   const set = (key) => (e) =>
     setForm((f) => ({ ...f, [key]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }))
@@ -50,18 +59,18 @@ export default function Register() {
 
         <form onSubmit={submit}>
           <div className="field">
-            <label>Email</label>
+            <label>{t('auth.email')}</label>
             <input type="email" value={form.email} onChange={set('email')} required autoComplete="email" />
           </div>
 
           <div className="field">
-            <label>Username</label>
+            <label>{t('auth.username')}</label>
             <input value={form.username} onChange={set('username')} required minLength={3} maxLength={32}
               placeholder="letters, digits, _ and -" />
           </div>
 
           <div className="field">
-            <label>Password</label>
+            <label>{t('auth.password')}</label>
             <input type="password" value={form.password} onChange={set('password')} required minLength={8}
               autoComplete="new-password" />
             <span className="tiny muted">At least 8 characters. Use a password manager.</span>
@@ -69,19 +78,23 @@ export default function Register() {
 
           <div className="row" style={{ gap: 12 }}>
             <div className="field" style={{ flex: 1 }}>
-              <label>Date of birth</label>
+              <label>{t('auth.date_of_birth')}</label>
               <input type="date" value={form.date_of_birth} onChange={set('date_of_birth')} required />
             </div>
             <div className="field" style={{ flex: 1 }}>
-              <label>Country</label>
+              <label>{t('auth.country')}</label>
               <select value={form.country} onChange={set('country')}>
-                {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {countries.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.name}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
 
           <div className="field">
-            <label>Bonus code (optional)</label>
+            <label>Bonus code ({t('common.optional')})</label>
             <input value={form.bonus_code} onChange={(e) => setForm((f) => ({ ...f, bonus_code: e.target.value.toUpperCase() }))} />
           </div>
 
@@ -97,12 +110,15 @@ export default function Register() {
           </div>
 
           <button className="btn btn-primary btn-block" disabled={busy || !form.accepts_terms}>
-            {busy ? <span className="spinner" /> : 'Create account'}
+            {busy ? <span className="spinner" /> : t('auth.signup')}
           </button>
         </form>
 
         <p className="small muted" style={{ marginTop: 14 }}>
-          Already registered? <Link to="/login" style={{ color: 'var(--accent)' }}>Log in</Link>.
+          {t('auth.have_account')}{' '}
+          <Link to="/login" style={{ color: 'var(--accent)' }}>
+            {t('auth.signin')}
+          </Link>
         </p>
 
         <p className="tiny muted" style={{ marginTop: 10 }}>

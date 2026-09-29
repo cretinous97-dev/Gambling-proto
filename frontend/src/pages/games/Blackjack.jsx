@@ -17,7 +17,7 @@ function PlayingCard({ card, small = false }) {
   )
 }
 
-export default function Blackjack({ minBet, maxBet, onSettled }) {
+export default function Blackjack({ onSettled }) {
   const [stake, setStake] = useState('5.00')
   const [bet, setBet] = useState(null)
   const [table, setTable] = useState(null)

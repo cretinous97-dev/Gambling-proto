@@ -129,6 +129,7 @@ export const api = {
   // --- wallet -------------------------------------------------------------
   wallet: () => request('/api/wallet/summary'),
   statement: (limit = 100) => request(`/api/wallet/statement?limit=${limit}`),
+  transactions: (query = '') => request(`/api/wallet/transactions${query}`),
   methods: () => request('/api/wallet/methods'),
   integrity: () => request('/api/wallet/integrity'),
   createDeposit: (body) => request('/api/wallet/deposits', { method: 'POST', body }),

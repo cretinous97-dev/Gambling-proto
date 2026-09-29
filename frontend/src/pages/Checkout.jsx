@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import { fmtCents } from '../lib/format.js'
+import { useTranslation } from 'react-i18next'
 import { Alert, Card, Copyable, Loading } from '../components/ui.jsx'
 import { useStore } from '../lib/store.jsx'
 
@@ -13,6 +14,7 @@ import { useStore } from '../lib/store.jsx'
  * and polls for the provider's webhook to land.
  */
 export default function Checkout() {
+  const { t } = useTranslation()
   const { depositId } = useParams()
   const navigate = useNavigate()
   const { refreshWallet, toast, config } = useStore()
@@ -70,20 +72,20 @@ export default function Checkout() {
 
   return (
     <div className="page narrow">
-      <Card title="Deposit checkout">
+      <Card title={t('checkout.title')}>
         {error && <Alert kind="error">{error}</Alert>}
 
         <div className="row between">
           <div className="stat">
-            <span className="label">Amount</span>
+            <span className="label">{t('checkout.amount')}</span>
             <span className="value">{fmtCents(deposit.amount)}</span>
           </div>
           <div className="stat">
-            <span className="label">Status</span>
+            <span className="label">{t('checkout.status')}</span>
             <span className={`badge ${done ? 'badge-ok' : 'badge-warn'}`}>{deposit.status}</span>
           </div>
           <div className="stat">
-            <span className="label">Reference</span>
+            <span className="label">{t('checkout.reference')}</span>
             <span className="tiny mono">{deposit.reference}</span>
           </div>
         </div>
@@ -92,61 +94,63 @@ export default function Checkout() {
 
         {deposit.instructions?.address && (
           <div className="alert alert-info">
-            <div className="small">Send exactly {fmtCents(deposit.amount)} to this address:</div>
+            <div className="small">
+              {t('checkout.send_exactly', { amount: fmtCents(deposit.amount) })}
+            </div>
             <Copyable value={deposit.instructions.address} />
             <div className="tiny" style={{ marginTop: 6 }}>
-              {deposit.instructions.network} · {deposit.instructions.confirmations_required} confirmations
-              required before credit
+              {deposit.instructions.network} ·{' '}
+              {t('checkout.confirmations_required', { count: deposit.instructions.confirmations_required })}
             </div>
           </div>
         )}
 
         {deposit.instructions?.iban && (
           <div className="alert alert-info">
-            <div className="small">Bank transfer details</div>
+            <div className="small">{t('checkout.bank_transfer')}</div>
             <div className="mono tiny">IBAN {deposit.instructions.iban}</div>
             <div className="mono tiny">SWIFT {deposit.instructions.swift}</div>
             <div className="mono tiny">Beneficiary {deposit.instructions.beneficiary}</div>
-            <div className="tiny">Include reference {deposit.instructions.reference_required}</div>
+            <div className="tiny">
+              {t('checkout.include_reference', { reference: deposit.instructions.reference_required })}
+            </div>
           </div>
         )}
 
         {done ? (
           <Alert kind="ok">
-            Payment confirmed. {fmtCents(deposit.credited)} is in your balance
-            {deposit.bonus_credited > 0 && <> plus {fmtCents(deposit.bonus_credited)} bonus</>}.
+            {t('checkout.confirmed', { amount: fmtCents(deposit.credited) })}
+            {deposit.bonus_credited > 0 && (
+              <> {t('checkout.plus_bonus', { amount: fmtCents(deposit.bonus_credited) })}</>
+            )}.
           </Alert>
         ) : deposit.status === 'failed' ? (
           <Alert kind="error">
-            Payment failed: {deposit.failure_reason || 'declined'}. Nothing was charged.
+            {t('checkout.failed', { reason: deposit.failure_reason || t('checkout.declined') })}
           </Alert>
         ) : deposit.status === 'chargeback' ? (
-          <Alert kind="error">This payment was reversed by the bank.</Alert>
+          <Alert kind="error">{t('checkout.chargeback')}</Alert>
         ) : simulation ? (
           <>
-            <Alert kind="warn">
-              Sandbox provider — these buttons stand in for the customer completing the payment on
-              the provider's page.
-            </Alert>
+            <Alert kind="warn">{t('checkout.sandbox_note')}</Alert>
             <div className="row">
               <button className="btn btn-ok" disabled={busy} onClick={() => act('succeed')}>
-                I paid — confirm
+                {t('checkout.paid_confirm')}
               </button>
               <button className="btn" disabled={busy} onClick={() => act('fail')}>
-                Payment declined
+                {t('checkout.declined_action')}
               </button>
             </div>
           </>
         ) : (
           <p className="small muted">
-            Waiting for the provider to confirm (checked automatically{poll ? ` · check #${poll}` : ''}).
-            You can safely close this page — the deposit will be credited by webhook.
+            {t('checkout.waiting', { poll: poll ? t('checkout.poll_suffix', { count: poll }) : '' })}
           </p>
         )}
 
         <div className="row" style={{ marginTop: 18 }}>
-          <Link className="btn btn-sm" to="/wallet">Back to wallet</Link>
-          <Link className="btn btn-sm btn-ghost" to="/">Lobby</Link>
+          <Link className="btn btn-sm" to="/wallet">{t('checkout.back_to_wallet')}</Link>
+          <Link className="btn btn-sm btn-ghost" to="/">{t('checkout.lobby')}</Link>
         </div>
       </Card>
     </div>

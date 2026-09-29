@@ -14,7 +14,7 @@ export default function Mines({ minBet, maxBet, onSettled }) {
   const [stake, setStake] = useState('1.00')
   const [mineCount, setMineCount] = useState(3)
   const [bet, setBet] = useState(null)
-  const { busy, error, run, setError } = useBetSubmit(onSettled)
+  const { busy, error, run } = useBetSubmit(onSettled)
 
   const board = bet?.result?.board || []
   const revealed = bet?.result?.revealed || []

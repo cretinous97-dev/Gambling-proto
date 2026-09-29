@@ -1,442 +1,516 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+/**
+ * The wallet dashboard.
+ *
+ * Layout, top to bottom, in the order a player's questions arrive:
+ *
+ *  1. **How much do I have?** - one hero figure, with bonus and locked shown
+ *     underneath so the total is never a surprise. Locked money is explained
+ *     as "in play" rather than hidden, because a player who cannot see their
+ *     money assumes it is gone.
+ *  2. **What can I do?** - Add funds and Cash out, the only two primary
+ *     actions, above the fold. Both open a sheet; the sheet is where the form
+ *     lives so the dashboard never turns into a form.
+ *  3. **What is happening right now?** - in-flight deposits and withdrawals,
+ *     with the status that says who we are waiting for. A withdrawal that was
+ *     auto-approved looks different from one a human has to review, and both
+ *     look different from money still sitting at a payment processor.
+ *  4. **What happened?** - the settled ledger, newest first, filterable.
+ *
+ * Every amount goes through <Money>, which converts for display and keeps the
+ * settlement figure in the tooltip. Nothing on this page computes money.
+ */
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+
+import Money from '../components/Money.jsx'
+import StatusChip from '../components/StatusChip.jsx'
+import { DisplayCurrencyNote } from '../components/LocalizationControls.jsx'
 import { api } from '../lib/api.js'
-import { fmtCents } from '../lib/format.js'
-
-import { Card, Stat, Badge, Alert, Loading, Empty, Modal, ActionButton } from '../components/ui.jsx'
 import { useStore } from '../lib/store.jsx'
+import { toAmountString } from '../lib/money.js'
+import { fmtDate } from '../lib/format.js'
 
-const PAYMENT_NAME = {
-  card: 'Card', bank_transfer: 'Bank transfer',
-  crypto_btc: 'Bitcoin', crypto_eth: 'Ethereum', crypto_usdt: 'USDT (TRC-20)',
-  ewallet: 'E-wallet',
+const PAGE_SIZE = 15
+
+function StatCard({ label, children, tone = 'default', hint }) {
+  const tones = {
+    default: 'border-line bg-panel',
+    accent: 'border-accent-2/40 bg-accent-2/10',
+    warn: 'border-warn/40 bg-warn/10',
+  }
+  return (
+    <div className={`rounded-2xl border p-4 ${tones[tone]}`}>
+      <div className="text-xs uppercase tracking-wide text-muted">{label}</div>
+      <div className="mt-1 text-2xl font-semibold">{children}</div>
+      {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
+    </div>
+  )
 }
 
-const QUICK = ['10.00', '25.00', '50.00', '100.00']
+function Sheet({ title, onClose, children }) {
+  const { t } = useTranslation()
+  useEffect(() => {
+    const onKey = (event) => event.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="max-h-[92vh] w-full overflow-y-auto rounded-t-3xl border border-line bg-panel p-5 sm:max-w-lg sm:rounded-2xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <button type="button" onClick={onClose} className="btn btn-sm" aria-label={t('common.close')}>
+            ✕
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function DepositSheet({ onDone }) {
+  const { t } = useTranslation()
+  const { config } = useStore()
+  const navigate = useNavigate()
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState('card')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const limits = config?.limits || {}
+  const suggestions = [10, 25, 50, 100, 250]
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setBusy(true)
+    try {
+      const body = { amount: toAmountString(amount), method }
+      const created = await api.createDeposit(body)
+      onDone?.()
+      // The checkout page owns the next step (redirect, wallet address, or the
+      // sandbox confirmation), because every provider continues differently.
+      navigate(`/checkout/${created.deposit_id}`)
+    } catch (err) {
+      setError(err.message || 'Deposit could not be started')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <label className="mb-1 block text-sm text-muted" htmlFor="deposit-amount">
+          {t('common.deposit')}
+        </label>
+        <input
+          id="deposit-amount"
+          className="w-full rounded-xl border border-line bg-panel-2 px-4 py-3 text-2xl money"
+          inputMode="decimal"
+          autoFocus
+          value={amount}
+          onChange={(event) => setAmount(toAmountString(event.target.value))}
+          placeholder="0.00"
+          required
+        />
+        <div className="mt-2 flex flex-wrap gap-2">
+          {suggestions.map((value) => (
+            <button
+              key={value}
+              type="button"
+              className="rounded-lg border border-line px-3 py-1 text-sm hover:border-accent-2"
+              onClick={() => setAmount(String(value))}
+            >
+              {value}
+            </button>
+          ))}
+        </div>
+        {limits.min_deposit ? (
+          <p className="mt-2 text-xs text-muted">
+            min {limits.min_deposit / 100} · max {limits.max_deposit / 100}
+          </p>
+        ) : null}
+      </div>
+
+      <div>
+        <label className="mb-1 block text-sm text-muted" htmlFor="deposit-method">
+          Payment method
+        </label>
+        <select
+          id="deposit-method"
+          className="w-full rounded-xl border border-line bg-panel-2 px-3 py-2"
+          value={method}
+          onChange={(event) => setMethod(event.target.value)}
+        >
+          <option value="card">Card</option>
+          <option value="bank_transfer">Bank transfer</option>
+          <option value="crypto_usdt">USDT</option>
+          <option value="crypto_btc">Bitcoin</option>
+          <option value="crypto_eth">Ethereum</option>
+        </select>
+      </div>
+
+      {error && <p className="rounded-lg bg-bad/10 px-3 py-2 text-sm text-bad">{error}</p>}
+
+      <button type="submit" className="btn btn-primary btn-block" disabled={busy || !amount}>
+        {busy ? t('common.loading') : t('common.continue')}
+      </button>
+      <DisplayCurrencyNote />
+    </form>
+  )
+}
+
+function WithdrawSheet({ onClose, onDone, wallet }) {
+  const { t } = useTranslation()
+  const { config, toast } = useStore()
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState('crypto_usdt')
+  const [destination, setDestination] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const limits = config?.limits || {}
+  const available = wallet?.withdrawable ?? 0
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setError('')
+    setBusy(true)
+    try {
+      await api.createWithdrawal({
+        amount: toAmountString(amount),
+        method,
+        destination: destination.trim(),
+      })
+      toast('Withdrawal requested', 'success')
+      onDone?.()
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Withdrawal could not be requested')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <div className="rounded-xl border border-line bg-panel-2 p-3 text-sm">
+        <div className="flex justify-between">
+          <span className="text-muted">{t('wallet.withdrawable')}</span>
+          <Money amount={available} className="font-semibold" />
+        </div>
+        {wallet?.locked > 0 && (
+          <div className="mt-1 flex justify-between text-xs text-muted">
+            <span>{t('wallet.locked')}</span>
+            <Money amount={wallet.locked} />
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="mb-1 block text-sm text-muted" htmlFor="withdraw-amount">
+          {t('common.withdraw')}
+        </label>
+        <input
+          id="withdraw-amount"
+          className="w-full rounded-xl border border-line bg-panel-2 px-4 py-3 text-2xl money"
+          inputMode="decimal"
+          autoFocus
+          value={amount}
+          onChange={(event) => setAmount(toAmountString(event.target.value))}
+          placeholder="0.00"
+          required
+        />
+        <button
+          type="button"
+          className="mt-2 text-xs text-accent-2 underline"
+          onClick={() => setAmount((available / 100).toFixed(2))}
+        >
+          Use full balance
+        </button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-sm text-muted" htmlFor="withdraw-method">
+            Method
+          </label>
+          <select
+            id="withdraw-method"
+            className="w-full rounded-xl border border-line bg-panel-2 px-3 py-2"
+            value={method}
+            onChange={(event) => setMethod(event.target.value)}
+          >
+            <option value="crypto_usdt">USDT (TRC-20)</option>
+            <option value="crypto_btc">Bitcoin</option>
+            <option value="crypto_eth">Ethereum</option>
+            <option value="bank_transfer">Bank transfer</option>
+          </select>
+        </div>
+        <div>
+          <label className="mb-1 block text-sm text-muted" htmlFor="withdraw-destination">
+            Destination
+          </label>
+          <input
+            id="withdraw-destination"
+            className="w-full rounded-xl border border-line bg-panel-2 px-3 py-2"
+            value={destination}
+            onChange={(event) => setDestination(event.target.value)}
+            placeholder={method.startsWith('crypto') ? 'Wallet address' : 'IBAN / account'}
+            required
+            minLength={4}
+          />
+        </div>
+      </div>
+
+      <p className="text-xs text-muted">
+        min {limits.min_withdrawal / 100} · max {limits.max_withdrawal / 100} · identity
+        verification is required above {limits.kyc_required_above / 100} in lifetime
+        withdrawals.
+      </p>
+
+      {error && <p className="rounded-lg bg-bad/10 px-3 py-2 text-sm text-bad">{error}</p>}
+
+      <button type="submit" className="btn btn-primary btn-block" disabled={busy || !amount}>
+        {busy ? t('common.loading') : t('common.withdraw')}
+      </button>
+    </form>
+  )
+}
+
+function PendingRow({ item }) {
+  const { t } = useTranslation()
+  return (
+    <li className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel-2/60 px-3 py-2.5">
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium">
+          {t(`kinds.${item.kind === 'deposit' ? 'deposit' : 'withdrawal_hold'}`)}
+        </div>
+        <div className="text-xs text-muted">{fmtDate(item.created_at)}</div>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <Money amount={item.amount} signed className="font-medium" />
+        <StatusChip status={item.status} />
+        {item.kind === 'deposit' && item.resumable && (
+          <Link to={`/checkout/${item.id}`} className="btn btn-sm">
+            {t('common.continue')}
+          </Link>
+        )}
+      </div>
+    </li>
+  )
+}
 
 export default function Wallet() {
+  const { t } = useTranslation()
   const { wallet, refreshWallet, toast } = useStore()
-
-  const [methods, setMethods] = useState(null)
-  const [statement, setStatement] = useState([])
-  const [deposits, setDeposits] = useState([])
-  const [withdrawals, setWithdrawals] = useState([])
-  const [integrity, setIntegrity] = useState(null)
+  const [sheet, setSheet] = useState(null)
+  const [history, setHistory] = useState({ entries: [], pending: [], total: 0 })
+  const [page, setPage] = useState(0)
+  const [kind, setKind] = useState('')
   const [loading, setLoading] = useState(true)
 
-  // deposit form
-  const [depAmount, setDepAmount] = useState('25.00')
-  const [depMethod, setDepMethod] = useState('card')
-  const [bonusCode, setBonusCode] = useState('')
-
-  // withdrawal form
-  const [wdAmount, setWdAmount] = useState('')
-  const [wdMethod, setWdMethod] = useState('crypto_usdt')
-  const [wdDestination, setWdDestination] = useState('')
-
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [activeDeposit, setActiveDeposit] = useState(null)
-
-  const load = async () => {
+  const loadHistory = useCallback(async () => {
+    setLoading(true)
     try {
-      const [m, s, d, w, i] = await Promise.all([
-        api.methods(),
-        api.statement(60),
-        api.deposits(),
-        api.withdrawals(),
-        api.integrity(),
-      ])
-      setMethods(m)
-      setStatement(s.entries)
-      setDeposits(d.deposits)
-      setWithdrawals(w.withdrawals)
-      setIntegrity(i)
+      const query = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(page * PAGE_SIZE),
+      })
+      if (kind) query.set('kind', kind)
+      const data = await api.transactions(`?${query.toString()}`)
+      setHistory(data)
     } catch (err) {
-      setError(err.message)
+      toast(err.message || 'Could not load transactions', 'error')
     } finally {
       setLoading(false)
     }
-  }
+  }, [page, kind, toast])
 
   useEffect(() => {
-    load()
-    refreshWallet()
-  }, [])
+    loadHistory()
+  }, [loadHistory])
 
-  const submitDeposit = async () => {
-    setError('')
-    setBusy(true)
-    try {
-      const body = {
-        amount: depAmount,
-        method: depMethod,
-        // Idempotency key makes the request safe to retry: a double-tap or a
-        // dropped connection can never charge the player twice.
-        idempotency_key: `dep-${Date.now()}-${depMethod}-${depAmount}`,
-        bonus_code: bonusCode || undefined,
-      }
-      const intent = await api.createDeposit(body)
-      toast('Deposit created - complete the payment', 'success')
-      await load()
-      setActiveDeposit(intent)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
+  const refreshAll = async () => {
+    await Promise.all([refreshWallet(), loadHistory()])
   }
 
-  const submitWithdrawal = async () => {
-    setError('')
-    setBusy(true)
-    try {
-      const res = await api.createWithdrawal({
-        amount: wdAmount,
-        method: wdMethod,
-        destination: wdDestination,
-        idempotency_key: `wd-${Date.now()}-${wdMethod}`,
-      })
-      toast(
-        res.status === 'paid'
-          ? 'Withdrawal paid'
-          : `Withdrawal reserved (${fmtCents(res.amount)}) - pending review`,
-        'success',
-      )
-      setWdAmount('')
-      setWdDestination('')
-      await Promise.all([load(), refreshWallet()])
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
-  }
+  const kinds = useMemo(
+    () => ['', 'deposit', 'withdrawal_settled', 'bet_stake', 'bet_payout', 'bonus_claim'],
+    [],
+  )
 
-  const simulate = async (depositId, outcome) => {
-    setError('')
-    try {
-      await api.simulateDeposit(depositId, outcome)
-      toast(outcome === 'succeed' ? 'Payment confirmed' : `Payment ${outcome}`, 
-            outcome === 'succeed' ? 'success' : 'error')
-      setActiveDeposit(null)
-      await Promise.all([load(), refreshWallet()])
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  if (loading) return <div className="page"><Loading /></div>
-
-  const limits = methods?.limits || {}
-  const simulation = methods?.simulation
-  const cash = wallet?.cash ?? 0
+  const pages = Math.max(1, Math.ceil((history.total || 0) / PAGE_SIZE))
 
   return (
-    <div className="page">
-      <h1 style={{ marginTop: 0 }}>Wallet</h1>
-      {error && <Alert kind="error">{error}</Alert>}
-
-      <div className="grid grid-4" style={{ marginBottom: 18 }}>
-        <Card className="tight"><Stat label="Cash" value={fmtCents(cash)} hint="Withdrawable" /></Card>
-        <Card className="tight">
-          <Stat label="Bonus" value={fmtCents(wallet?.bonus ?? 0)}
-            hint={wallet?.pending_wager ? `${fmtCents(wallet.pending_wager)} playthrough left` : 'No wagering open'} />
-        </Card>
-        <Card className="tight">
-          <Stat label="Locked" value={fmtCents(wallet?.locked ?? 0)} hint="Open hands / pending payouts" />
-        </Card>
-        <Card className="tight">
-          <Stat label="Ledger" value={integrity?.books_balanced ? 'Balanced' : 'Check'}
-            hint="Every entry sums to zero" />
-        </Card>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">{t('wallet.title')}</h1>
+          <p className="text-sm text-muted">{t('wallet.subtitle')}</p>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" className="btn btn-primary" onClick={() => setSheet('deposit')}>
+            {t('wallet.deposit_cta')}
+          </button>
+          <button type="button" className="btn" onClick={() => setSheet('withdraw')}>
+            {t('wallet.withdraw_cta')}
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-2" style={{ alignItems: 'start' }}>
-        {/* ------------------------------------------------------ deposit */}
-        <Card title="Deposit">
-          <div className="field">
-            <label>Amount (USD)</label>
-            <input inputMode="decimal" value={depAmount}
-              onChange={(e) => setDepAmount(e.target.value.replace(/[^0-9.]/g, ''))} />
-            <div className="row" style={{ gap: 6 }}>
-              {QUICK.map((q) => (
-                <button key={q} className="btn btn-sm" onClick={() => setDepAmount(q)}>${Number(q).toFixed(0)}</button>
-              ))}
-            </div>
-            <span className="tiny muted">
-              Min {fmtCents(limits.min_deposit || 500)} · Max {fmtCents(limits.max_deposit || 1000000)} per
-              transaction. Larger amounts: contact support.
-            </span>
-          </div>
+      {/* 1. the balance, in a hierarchy that adds up */}
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label={t('wallet.available')} tone="accent">
+          <Money amount={wallet?.cash ?? 0} />
+        </StatCard>
+        <StatCard label={t('wallet.bonus')} hint={t('wallet.pending_wager')}>
+          <Money amount={wallet?.bonus ?? 0} />
+        </StatCard>
+        <StatCard label={t('wallet.locked')} tone={wallet?.locked ? 'warn' : 'default'}>
+          <Money amount={wallet?.locked ?? 0} />
+        </StatCard>
+        <StatCard label={t('wallet.total')}>
+          <Money amount={(wallet?.cash ?? 0) + (wallet?.bonus ?? 0)} />
+        </StatCard>
+      </section>
 
-          <div className="field">
-            <label>Method</label>
-            <select value={depMethod} onChange={(e) => setDepMethod(e.target.value)}>
-              {(methods?.deposit || []).map((m) => (
-                <option key={m.method} value={m.method}>{m.label}</option>
-              ))}
-            </select>
-          </div>
+      <DisplayCurrencyNote />
 
-          <div className="field">
-            <label>Bonus code (optional)</label>
-            <input value={bonusCode} onChange={(e) => setBonusCode(e.target.value.toUpperCase())}
-              placeholder="e.g. WELCOME" />
-          </div>
-
-          <button className="btn btn-primary btn-block" disabled={busy || !depAmount} onClick={submitDeposit}>
-            {busy ? <span className="spinner" /> : `Deposit ${fmtCents(Math.round(Number(depAmount || 0) * 100))}`}
-          </button>
-
-          {simulation && (
-            <p className="tiny muted" style={{ marginTop: 10 }}>
-              Sandbox provider active: you will get a simulated checkout you can complete or fail,
-              so you can test the full credit path.
-            </p>
-          )}
-        </Card>
-
-        {/* --------------------------------------------------- withdrawal */}
-        <Card title="Withdraw">
-          <div className="field">
-            <label>Amount (USD)</label>
-            <input inputMode="decimal" value={wdAmount}
-              onChange={(e) => setWdAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-              placeholder={(limits.min_withdrawal / 100).toFixed(2)} />
-            <div className="row" style={{ gap: 6 }}>
-              <button className="btn btn-sm" onClick={() => setWdAmount((cash / 100).toFixed(2))}>
-                Cash balance ({fmtCents(cash)})
-              </button>
-            </div>
-            <span className="tiny muted">
-              Min {fmtCents(limits.min_withdrawal || 1000)} · Max {fmtCents(limits.max_withdrawal || 500000)}.
-              Bonus funds must be played through before withdrawing.
-            </span>
-          </div>
-
-          <div className="field">
-            <label>Payout method</label>
-            <select value={wdMethod} onChange={(e) => setWdMethod(e.target.value)}>
-              {(methods?.withdrawal || []).map((m) => (
-                <option key={m.method} value={m.method}>{m.label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label>Destination</label>
-            <input value={wdDestination} onChange={(e) => setWdDestination(e.target.value)}
-              placeholder={
-                wdMethod.startsWith('crypto') ? 'Your wallet address'
-                  : wdMethod === 'bank_transfer' ? 'IBAN / account number'
-                    : 'Card number (stored as last 4 only)'
-              } />
-            <span className="tiny muted">
-              Payouts are reviewed by a human before they are sent. Typical turnaround: under 24 hours.
-            </span>
-          </div>
-
-          {methods?.kyc_required && (
-            <Alert kind="warn">
-              Identity verification is required before your first payout.{' '}
-              <Link to="/account">Upload documents</Link>.
-            </Alert>
-          )}
-
-          <button className="btn btn-ok btn-block" disabled={busy || !wdAmount || !wdDestination}
-            onClick={submitWithdrawal}>
-            {busy ? <span className="spinner" /> : 'Request withdrawal'}
-          </button>
-        </Card>
-      </div>
-
-      {/* ------------------------------------------------ pending payout */}
-      {withdrawals.filter((w) => ['requested', 'under_review', 'approved'].includes(w.status)).length > 0 && (
-        <Card title="Pending withdrawals" className="card" style={{ marginTop: 18 }}>
-          {withdrawals
-            .filter((w) => ['requested', 'under_review', 'approved'].includes(w.status))
-            .map((w) => (
-              <div key={w.id} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--line)' }}>
-                <div>
-                  <div><strong>{fmtCents(w.amount)}</strong> via {PAYMENT_NAME[w.method]}</div>
-                  <div className="tiny muted">{w.destination} · {w.id.slice(0, 10)}</div>
-                </div>
-                <div className="row">
-                  <Badge status={w.status} />
-                  {w.cancellable && (
-                    <ActionButton
-                      className="btn btn-sm"
-                      confirm
-                      onClick={async () => {
-                        await api.cancelWithdrawal(w.id)
-                        toast('Withdrawal cancelled - funds returned')
-                        await Promise.all([load(), refreshWallet()])
-                      }}
-                    >
-                      Cancel
-                    </ActionButton>
-                  )}
-                </div>
-              </div>
+      {/* 2. what is in flight right now */}
+      {history.pending?.length > 0 && (
+        <section className="rounded-2xl border border-line bg-panel p-4">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
+            {t('tx.in_flight')}
+          </h2>
+          <ul className="space-y-2">
+            {history.pending.map((item) => (
+              <PendingRow key={`${item.kind}-${item.id}`} item={item} />
             ))}
-        </Card>
+          </ul>
+        </section>
       )}
 
-      {/* ------------------------------------------------------- history */}
-      <div className="grid grid-2" style={{ marginTop: 18, alignItems: 'start' }}>
-        <Card title="Deposits">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>When</th><th>Amount</th><th>Method</th><th>Status</th><th /></tr>
-              </thead>
-              <tbody>
-                {deposits.map((d) => (
-                  <tr key={d.id}>
-                    <td className="tiny">{new Date(d.created_at).toLocaleString()}</td>
-                    <td>{fmtCents(d.amount)}</td>
-                    <td className="tiny">{PAYMENT_NAME[d.method]}</td>
-                    <td>
-                      <Badge status={d.status} />
-                      {d.bonus_credited > 0 && (
-                        <span className="tiny muted"> +{fmtCents(d.bonus_credited)} bonus</span>
-                      )}
-                    </td>
-                    <td>
-                      {['pending', 'requires_action'].includes(d.status) && (
-                        <button className="btn btn-sm" onClick={async () => setActiveDeposit(await api.deposit(d.id))}>
-                          Resume
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!deposits.length && <Empty>No deposits yet.</Empty>}
-          </div>
-        </Card>
-
-        <Card title="Ledger entries">
-          <p className="tiny muted">
-            A double-entry record: every row is one side of a transaction that sums to zero
-            across the whole system.
-          </p>
-          <div className="table-wrap" style={{ maxHeight: 380, overflowY: 'auto' }}>
-            <table>
-              <thead>
-                <tr><th>When</th><th>Type</th><th>Account</th><th style={{ textAlign: 'right' }}>Amount</th><th style={{ textAlign: 'right' }}>Balance</th></tr>
-              </thead>
-              <tbody>
-                {statement.map((e) => (
-                  <tr key={e.id}>
-                    <td className="tiny">{new Date(e.created_at).toLocaleString()}</td>
-                    <td className="tiny">{e.type}</td>
-                    <td className="tiny">{e.account.replace('user_', '')}</td>
-                    <td style={{ textAlign: 'right', color: e.amount >= 0 ? 'var(--ok)' : 'var(--bad)' }}>
-                      {e.amount >= 0 ? '+' : ''}{fmtCents(e.amount)}
-                    </td>
-                    <td style={{ textAlign: 'right' }} className="tiny">{fmtCents(e.balance_after)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!statement.length && <Empty>No transactions yet. Make a deposit to start.</Empty>}
-          </div>
-        </Card>
-      </div>
-
-      <Card title="Withdrawal history" style={{ marginTop: 18 }}>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr><th>When</th><th>Amount</th><th>Net</th><th>Method</th><th>Destination</th><th>Status</th><th>Reference</th></tr>
-            </thead>
-            <tbody>
-              {withdrawals.map((w) => (
-                <tr key={w.id}>
-                  <td className="tiny">{new Date(w.created_at).toLocaleString()}</td>
-                  <td>{fmtCents(w.amount)}</td>
-                  <td className="tiny">{fmtCents(w.net_amount)}</td>
-                  <td className="tiny">{PAYMENT_NAME[w.method]}</td>
-                  <td className="tiny mono">{w.destination}</td>
-                  <td>
-                    <Badge status={w.status} />
-                    {w.rejection_reason && <div className="tiny muted">{w.rejection_reason}</div>}
-                  </td>
-                  <td className="tiny mono">{w.provider_ref || '—'}</td>
-                </tr>
+      {/* 3. the settled ledger */}
+      <section className="rounded-2xl border border-line bg-panel">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line p-4">
+          <h2 className="font-semibold">{t('tx.title')}</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-xs text-muted" htmlFor="tx-kind">
+              {t('tx.kind')}
+            </label>
+            <select
+              id="tx-kind"
+              className="rounded-lg border border-line bg-panel-2 px-2 py-1.5 text-sm"
+              value={kind}
+              onChange={(event) => {
+                setPage(0)
+                setKind(event.target.value)
+              }}
+            >
+              {kinds.map((value) => (
+                <option key={value || 'all'} value={value}>
+                  {value ? t(`kinds.${value}`) : t('common.all')}
+                </option>
               ))}
-            </tbody>
-          </table>
-          {!withdrawals.length && <Empty>No withdrawals yet.</Empty>}
+            </select>
+            <button type="button" className="btn btn-sm" onClick={refreshAll}>
+              ↻
+            </button>
+          </div>
         </div>
-      </Card>
 
-      {/* ------------------------------------------- sandbox checkout modal */}
-      {activeDeposit && (
-        <Modal title="Complete your payment" onClose={() => setActiveDeposit(null)}>
-          <p className="small">
-            <strong>{fmtCents(activeDeposit.amount)}</strong> via {PAYMENT_NAME[activeDeposit.method]} ·
-            reference <span className="mono tiny">{activeDeposit.reference}</span>
-          </p>
+        {loading ? (
+          <p className="p-6 text-sm text-muted">{t('common.loading')}</p>
+        ) : history.entries.length === 0 ? (
+          <p className="p-6 text-sm text-muted">{t('tx.empty')}</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase tracking-wide text-muted">
+                <tr className="border-b border-line">
+                  <th className="p-3 text-start font-medium">{t('tx.kind')}</th>
+                  <th className="p-3 text-start font-medium">{t('tx.date')}</th>
+                  <th className="p-3 text-end font-medium">{t('tx.amount')}</th>
+                  <th className="hidden p-3 text-end font-medium sm:table-cell">
+                    {t('tx.balance_after')}
+                  </th>
+                  <th className="p-3 text-end font-medium">{t('tx.status')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.entries.map((entry) => (
+                  <tr key={entry.id} className="border-b border-line/50 last:border-0">
+                    <td className="p-3">
+                      <div className="font-medium">
+                        {t(`kinds.${entry.kind}`, { defaultValue: entry.kind })}
+                      </div>
+                      {entry.memo && <div className="text-xs text-muted">{entry.memo}</div>}
+                    </td>
+                    <td className="whitespace-nowrap p-3 text-muted">{fmtDate(entry.created_at)}</td>
+                    <td
+                      className={`p-3 text-end font-medium ${
+                        entry.amount > 0 ? 'text-ok' : 'text-ink'
+                      }`}
+                    >
+                      <Money amount={entry.amount} signed />
+                    </td>
+                    <td className="hidden p-3 text-end text-muted sm:table-cell">
+                      <Money amount={entry.balance_after} />
+                    </td>
+                    <td className="p-3 text-end">
+                      <StatusChip status={entry.status} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-          {activeDeposit.instructions?.address && (
-            <div className="alert alert-info">
-              <div className="tiny">Send the exact amount to:</div>
-              <div className="mono" style={{ wordBreak: 'break-all', margin: '6px 0' }}>
-                {activeDeposit.instructions.address}
-              </div>
-              <div className="tiny">
-                Network: {activeDeposit.instructions.network} · confirmations required:{' '}
-                {activeDeposit.instructions.confirmations_required}
-              </div>
-            </div>
-          )}
-          {activeDeposit.instructions?.iban && (
-            <div className="alert alert-info">
-              <div className="mono tiny">IBAN {activeDeposit.instructions.iban}</div>
-              <div className="mono tiny">SWIFT {activeDeposit.instructions.swift}</div>
-              <div className="tiny">Use reference {activeDeposit.instructions.reference_required}</div>
-            </div>
-          )}
-          {activeDeposit.instructions?.card_hint && (
-            <div className="alert alert-info">
-              Simulated card: <span className="mono">{activeDeposit.instructions.card_hint}</span>
-            </div>
-          )}
+        {pages > 1 && (
+          <div className="flex items-center justify-between border-t border-line p-3 text-sm">
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              {t('common.previous')}
+            </button>
+            <span className="text-muted">
+              {page + 1} {t('common.of')} {pages}
+            </span>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={page + 1 >= pages}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              {t('common.next')}
+            </button>
+          </div>
+        )}
+      </section>
 
-          {simulation ? (
-            <>
-              <Alert kind="warn">
-                Sandbox mode: use the buttons below to emulate what the payment provider would send
-                back. Nothing is charged.
-              </Alert>
-              <div className="row">
-                <button className="btn btn-ok" onClick={() => simulate(activeDeposit.deposit_id, 'succeed')}>
-                  Simulate successful payment
-                </button>
-                <button className="btn" onClick={() => simulate(activeDeposit.deposit_id, 'fail')}>
-                  Simulate decline
-                </button>
-                <button className="btn btn-bad" onClick={() => simulate(activeDeposit.deposit_id, 'chargeback')}>
-                  Simulate chargeback
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="row">
-              <a className="btn btn-primary" href={activeDeposit.instructions?.redirect_url || '#'}
-                target="_blank" rel="noreferrer">
-                Continue to provider
-              </a>
-              <button className="btn" onClick={async () => { setActiveDeposit(await api.deposit(activeDeposit.deposit_id)) }}>
-                I have paid — refresh
-              </button>
-            </div>
-          )}
-        </Modal>
+      {sheet === 'deposit' && (
+        <Sheet title={t('common.deposit')} onClose={() => setSheet(null)}>
+          <DepositSheet onDone={refreshAll} />
+        </Sheet>
+      )}
+      {sheet === 'withdraw' && (
+        <Sheet title={t('common.withdraw')} onClose={() => setSheet(null)}>
+          <WithdrawSheet onClose={() => setSheet(null)} onDone={refreshAll} wallet={wallet} />
+        </Sheet>
       )}
     </div>
   )

@@ -466,17 +466,66 @@ full annotated list. The safety-relevant defaults:
 | `PAYMENT_PROVIDER` | `sandbox` | no real money moves |
 | `AUTO_APPROVE_WITHDRAWAL_UNDER_USD` | `0` | every payout is human-reviewed |
 | `KYC_REQUIRED_ABOVE_USD` | `1000` | lifetime withdrawals before ID is required |
-| `JURISDICTION_BLOCKLIST` | `US,GB,FR,NL,AU` | placeholder, not legal advice |
+| `JURISDICTION_MODE` | `allow_all` | no country is blocked until you say so |
+| `GEO_ENFORCEMENT` | `false` | the edge's country header is not trusted by default |
 | `SECRET_KEY` | insecure default | app refuses to boot in prod with it |
 | `FIRST_DEPOSIT_BONUS_WAGER_X` | `30` | rollover on the welcome bonus |
+
+### Countries, languages and currencies
+
+Three separate switches, deliberately not wired to each other:
+
+**Which countries may play** is `JURISDICTION_MODE` plus a list. It ships open
+(`allow_all`): nothing is blocked out of the box, because which markets you
+accept players from is a licensing decision rather than a code decision. Set
+`JURISDICTION_MODE=blocklist` with `JURISDICTION_BLOCKLIST=US,GB,...`, or
+`allowlist` with the countries you are licensed for. `RESTRICTED_REGIONS` is
+the middle tier — accounts and play are allowed, deposits and payouts are
+refused with a specific message — which is what most operators actually want
+for markets where a licence is pending. Whatever you set, player-protection
+rules (age, KYC, AML flags, deposit and loss limits, self-exclusion) are
+enforced independently and are not affected by it.
+
+**What language a player sees** comes from the URL (`/es/wallet`), their stored
+preference, or the region the edge reports — in that order. Nine locales ship
+in `frontend/src/i18n/locales/` (`en`, `es`, `pt`, `de`, `fr`, `it`, `zh`,
+`hi`, `ar`), with `ar` right-to-left. `npm run i18n:check` fails the build if a
+locale is missing a key, drops a `{{placeholder}}`, or leaves a long string in
+English; it compares plural forms against the language's CLDR categories, so
+Arabic's six forms and Chinese's one are both correct rather than "inconsistent".
+
+**What currency a player sees** is display only. The ledger settles in
+`SETTLEMENT_CURRENCY` and stores integer minor units; `SETTLEMENT_CURRENCY`
+cannot be changed by a locale, a country or a preference, and no bet is ever
+priced in a display currency. `FX_RATES` (or the admin endpoint
+`PUT /api/admin/fx-rates`) only changes what a figure is converted to on the
+way to the screen, and every converted amount carries the settled figure in a
+tooltip. Treat the shipped rates as placeholders: a stale rate is a
+customer-facing promise, so wire them to your treasury feed before you take
+real money.
+
+**UI copy is translated; operator prose is not.** Button labels, table
+headers, statuses and error states exist in all nine locales. The long-form
+text — terms, privacy policy, responsible-gambling guidance, KYC instructions
+— stays in `en` until a human translates and reviews it: a machine-translated
+self-exclusion warning is a regulatory problem, not a cosmetic one.
 
 ---
 
 ## Testing
 
 ```bash
-make test                                   # 103 tests
+make test                                   # 194 tests
+cd frontend && npm run check                # lint, i18n parity, build, render smoke
 ```
+
+`npm run check` is the gate that matters for the UI. It runs ESLint, the
+translation parity checker, a production build, and `scripts/render-smoke.mjs`
+— which loads the real bundle in jsdom, stubs the API, and asserts that money,
+statuses and calls to action actually render: in English at `/wallet`, in
+Arabic (right-to-left) at `/ar/wallet`, and in Spanish on the account, bet
+history and checkout pages, including the limits form behind a tab click. A
+white screen, a raw `wallet.title` key or an untranslated money page fails it.
 
 - `test_ledger.py` — double-entry invariants, zero-sum, insufficient funds
 - `test_flows.py` — auth, deposits, withdrawals, admin review, bonuses,

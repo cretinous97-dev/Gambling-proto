@@ -1,12 +1,13 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 // The dev server proxies /api to the FastAPI backend so the browser only ever
 // talks to one origin. That keeps cookies/CORS simple and, importantly, means
 // the preview URL works from a browser that cannot reach the sandbox's
 // localhost directly.
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     host: '0.0.0.0',
     port: 5173,

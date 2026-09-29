@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, openCrashSocket } from '../lib/api.js'
-import { fmtCents, fmtMultiplier } from '../lib/format.js'
+import { fmtCents } from '../lib/format.js'
 import { Alert, Card, Loading, Stat } from '../components/ui.jsx'
 import { useStore } from '../lib/store.jsx'
 
@@ -14,7 +14,7 @@ import { useStore } from '../lib/store.jsx'
 export default function Crash() {
   const { isAuthed, config, refreshWallet, toast, wallet } = useStore()
   const [state, setState] = useState(null)
-  const [bet, setBet] = useState(null)
+  const [, setBet] = useState(null)
   const [stake, setStake] = useState('1.00')
   const [autoCashout, setAutoCashout] = useState('')
   const [myBet, setMyBet] = useState(null)

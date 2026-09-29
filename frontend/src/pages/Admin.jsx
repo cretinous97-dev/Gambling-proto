@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
-import { fmtCents, fmtDate, fmtMultiplier, statusClass } from '../lib/format.js'
+import { fmtCents, fmtDate, fmtMultiplier } from '../lib/format.js'
 import { ActionButton, Alert, Badge, Card, Empty, Loading, Modal, Stat, Tabs } from '../components/ui.jsx'
 import { useStore } from '../lib/store.jsx'
 
