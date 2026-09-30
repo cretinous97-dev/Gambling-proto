@@ -23,7 +23,7 @@ export default function Leaderboard() {
     <div className="page medium">
       <h1 style={{ marginTop: 0 }}>{t('nav.leaderboard')}</h1>
       <p className="muted small">
-        Usernames are partially masked. Only multipliers and payouts from the last 24 hours are shown.
+        {t('leaderboard.masking_note')}
       </p>
 
       <div className="grid grid-2" style={{ alignItems: 'start' }}>

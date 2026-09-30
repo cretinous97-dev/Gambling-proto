@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { api, openCrashSocket } from '../lib/api.js'
 import { fmtCents } from '../lib/format.js'
@@ -12,6 +13,7 @@ import { useStore } from '../lib/store.jsx'
  * a doctored clock cannot buy a better number.
  */
 export default function Crash() {
+  const { t } = useTranslation()
   const { isAuthed, config, refreshWallet, toast, wallet } = useStore()
   const [state, setState] = useState(null)
   const [, setBet] = useState(null)
@@ -216,7 +218,7 @@ export default function Crash() {
         <Card title={myActiveBet ? 'Your bet this round' : 'Place a bet'}>
           {!isAuthed ? (
             <>
-              <p className="muted small">Log in to join the round.</p>
+              <p className="muted small">{t('crash.login_to_join')}</p>
               <div className="row">
                 <Link className="btn btn-primary" to="/login">Log in</Link>
                 <Link className="btn" to="/register">Sign up</Link>
@@ -257,7 +259,7 @@ export default function Crash() {
                   onChange={(e) => setAutoCashout(e.target.value.replace(/[^0-9.]/g, ''))}
                   placeholder="e.g. 2.00" />
                 <span className="tiny muted">
-                  Fires automatically if the curve reaches your target — it cannot fire after the bust.
+                  {t('crash.auto_cashout_note')}
                 </span>
               </div>
               <button className="btn btn-primary btn-block" onClick={placeBet} disabled={busy || !betting || !stake}>
@@ -276,7 +278,7 @@ export default function Crash() {
 
         <Card title="Players in this round">
           <div className="players-list">
-            {(state.players || []).length === 0 && <p className="muted small">No players yet — be first.</p>}
+            {(state.players || []).length === 0 && <p className="muted small">{t('crash.no_players')}</p>}
             {(state.players || []).map((p, i) => (
               <div key={i} className={`player-row ${p.is_you ? 'you' : ''}`}>
                 <span>{p.username}{p.is_you ? ' (you)' : ''}</span>

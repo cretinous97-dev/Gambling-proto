@@ -38,8 +38,10 @@ class Settings(BaseSettings):
     # and no process that keeps running between requests, which changes two
     # things: where SQLite is allowed to live, and how shared games advance.
     serverless: bool = bool(os.getenv("VERCEL") or os.getenv("SERVERLESS"))
-    # Demo mode is for public test deployments: the sandbox provider plus a
-    # database that resets. It is surfaced in /api/config so the UI can say so.
+    # Demo mode is for public test deployments: a database that resets, so the
+    # balances are not real money. Surfaced in /api/config, where the UI reads
+    # it to show that banner. Derived below from whether the balances actually
+    # survive; set DEMO_MODE=true to force it on for a deliberate demo.
     demo_mode: bool = False
 
     # --- security -----------------------------------------------------------
@@ -192,6 +194,30 @@ class Settings(BaseSettings):
                 self.database_url = f"sqlite:///{Path(self.sqlite_fallback_dir) / 'casino.db'}"
             else:
                 self.database_url = f"sqlite:///{self.base_dir / 'data' / 'casino.db'}"
+
+        # Demo mode drives a banner that tells the player their balance is not
+        # real money and may reset, and puts a "demo" badge next to it. That
+        # claim has to be true, or the site is lying to players about whether
+        # they are playing for money - in the one direction nobody forgives.
+        #
+        # It used to be set for every serverless deployment, which is wrong the
+        # moment you configure what the README tells you to configure: point
+        # DATABASE_URL at PostgreSQL and balances persist, set a live payment
+        # provider and the money is real, and the site still announced itself
+        # as a test deployment with a demo badge on the balance. A real-money
+        # operator could not turn it off.
+        #
+        # So it is derived from whether the balances actually survive - the one
+        # condition the banner's "may reset" is about. "Not real money" is a
+        # separate question, already answered separately by the sandbox banner,
+        # which keys off the provider being in simulation mode. DEMO_MODE=true
+        # forces this on for a deliberate public demo.
+        if "DEMO_MODE" in os.environ:
+            self.demo_mode = os.environ["DEMO_MODE"].strip().lower() in {"1", "true", "yes", "on"}
+        elif not self.serverless:
+            self.demo_mode = False
+        else:
+            self.demo_mode = self.persistence_is_temporary
         return self
 
     #: Set by the validator when a throwaway signing key had to be minted.

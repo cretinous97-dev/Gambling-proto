@@ -417,6 +417,21 @@ Set these in **Project → Settings → Environment Variables**:
 | `DATABASE_URL` | `postgresql+psycopg://…` | optional; without it balances reset |
 | `ADMIN_PASSWORD` | something real | the seeded default is public |
 | `CORS_ORIGINS` | `https://your-app.vercel.app` | replace the `*` default |
+| `ENVIRONMENT` | `production` | self-hosted only; enables the `SECRET_KEY` guard and the jurisdiction warning. On Vercel it is inferred — a Vercel deploy is treated as `staging` until you say otherwise, which is why one can look healthy while running without the guard |
+
+**The "demo" banner.** A deployment where balances do not survive shows players
+*"balances are not real money and may reset"*, and a DEMO badge beside the
+balance. That is derived from whether they actually survive: without
+`DATABASE_URL` on a serverless host it is on, and the moment you set
+`DATABASE_URL` it goes off by itself — because from then on the claim would be
+false. It is worth knowing that this used to be set for *every* serverless
+deployment, so a production deploy with PostgreSQL still announced itself as a
+test site with no way to turn it off.
+
+The separate *"Sandbox payments: no real money moves"* notice keys off the
+payment provider instead, and disappears when you set `PAYMENT_PROVIDER` to a
+live one. The two questions — do balances persist, and is the money real — have
+different answers and are shown separately.
 
 Two honest caveats:
 

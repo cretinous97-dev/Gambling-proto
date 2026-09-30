@@ -71,7 +71,10 @@
     "verified_honest": "Vérifié : honnête",
     "verify_round": "Vérifier une manche Crash",
     "vip": "VIP",
-    "your_seeds": "Vos graines"
+    "your_seeds": "Vos graines",
+    "loss_limit_note": "Les paris sont bloqués dès que vos pertes nettes du jour UTC atteignent ce montant.",
+    "full_name": "Nom complet (comme sur le document)",
+    "password_signout_note": "Changer votre mot de passe déconnecte toutes les autres sessions."
   },
   "auth": {
     "accept_terms": "J'ai 18 ans ou plus et j'accepte les Conditions et la Politique de confidentialité.",
@@ -163,6 +166,7 @@
     "max": "Max.",
     "next": "Suivant",
     "none": "Aucun",
+    "not_found": "Cette page n'existe pas.",
     "of": "sur",
     "optional": "facultatif",
     "page": "Page",
@@ -172,6 +176,11 @@
     "saved": "Enregistré",
     "verify": "Vérifier",
     "withdraw": "Retirer"
+  },
+  "crash": {
+    "login_to_join": "Connectez-vous pour rejoindre la manche.",
+    "auto_cashout_note": "Se déclenche automatiquement si la courbe atteint votre objectif — impossible après l'explosion.",
+    "no_players": "Aucun joueur pour l'instant — soyez le premier."
   },
   "currency": {
     "label": "Devise d'affichage"
@@ -185,7 +194,17 @@
   "games": {
     "win_chance": "Chance de gagner",
     "payout_on_win": "Gain en cas de victoire",
-    "profit_on_win": "Profit en cas de victoire"
+    "profit_on_win": "Profit en cas de victoire",
+    "press_deal": "Appuyez sur distribuer pour commencer une main",
+    "keno_pick": "Choisissez 1 à 10 numéros parmi 80. 20 sont tirés.",
+    "keno_legend": "Jaune = vos choix · violet = tirés · vert = trouvé"
+  },
+  "home": {
+    "contributed_from_wager": "Alimenté par chaque mise",
+    "crash_tagline": "Manche en direct partagée. Encaissez avant que la courbe n'explose.",
+    "no_wins_24h": "Aucun gain au cours des dernières 24 heures.",
+    "be_first_greeting": "Soyez le premier à dire bonjour.",
+    "signup_bonus_note": "Crédité dès votre inscription."
   },
   "kinds": {
     "admin_adjustment": "Ajustement",
@@ -206,6 +225,9 @@
   "lang": {
     "label": "Langue"
   },
+  "leaderboard": {
+    "masking_note": "Les noms d'utilisateur sont partiellement masqués. Seuls les multiplicateurs et les gains des dernières 24 heures sont affichés."
+  },
   "legal": {
     "terms": "Conditions",
     "privacy": "Confidentialité",
@@ -223,6 +245,9 @@
     "promotions": "Promotions",
     "support": "Assistance",
     "wallet": "Portefeuille"
+  },
+  "promotions": {
+    "none_running": "Aucune promotion en cours pour le moment."
   },
   "status": {
     "approved": "Approuvé",

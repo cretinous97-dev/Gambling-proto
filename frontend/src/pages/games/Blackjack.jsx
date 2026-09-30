@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Alert, Card } from '../../components/ui.jsx'
 import { api } from '../../lib/api.js'
 import { useBetSubmit } from './useBet.js'
@@ -18,6 +19,7 @@ function PlayingCard({ card, small = false }) {
 }
 
 export default function Blackjack({ onSettled }) {
+  const { t } = useTranslation()
   const [stake, setStake] = useState('5.00')
   const [bet, setBet] = useState(null)
   const [table, setTable] = useState(null)
@@ -69,7 +71,7 @@ export default function Blackjack({ onSettled }) {
           </div>
           <div className="row" style={{ gap: 8, minHeight: 80, marginTop: 6 }}>
             {table?.dealer?.cards?.map((c, i) => <PlayingCard key={i} card={c} />) || (
-              <span className="muted small">Press deal to start a hand</span>
+              <span className="muted small">{t('games.press_deal')}</span>
             )}
           </div>
         </div>

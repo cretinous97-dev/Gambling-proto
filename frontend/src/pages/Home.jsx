@@ -91,7 +91,7 @@ export default function Home() {
               <span className="value" style={{ color: 'var(--accent)', fontSize: 28 }}>
                 {fmtCents(jackpot?.amount ?? 0)}
               </span>
-              <span className="tiny muted">Contributed from every wager</span>
+              <span className="tiny muted">{t('home.contributed_from_wager')}</span>
             </div>
           </div>
         </div>
@@ -125,7 +125,7 @@ export default function Home() {
           <span className="rtp">99% RTP · LIVE</span>
           <div className="icon"><GameArt slug="crash" size={46} /></div>
           <div className="name">Crash</div>
-          <div className="small muted">Shared live round. Cash out before the curve busts.</div>
+          <div className="small muted">{t('home.crash_tagline')}</div>
         </Link>
         {games.map((g) => (
           <Link key={g.slug} to={`/game/${g.slug}`} className="game-tile">
@@ -140,7 +140,7 @@ export default function Home() {
       {/* ---------------------------------------------------------- panels */}
       <div className="grid grid-3" style={{ alignItems: 'start' }}>
         <Card title="Recent big multipliers">
-          {leaders.length === 0 && <Empty>No wins in the last 24 hours yet.</Empty>}
+          {leaders.length === 0 && <Empty>{t('home.no_wins_24h')}</Empty>}
           {leaders.map((l, i) => (
             <div key={i} className="row between small" style={{ padding: '6px 0', borderBottom: '1px solid rgba(36,48,82,.5)' }}>
               <span>
@@ -158,7 +158,7 @@ export default function Home() {
         <Card title="Live chat">
           <div className="chat-box">
             <div className="chat-scroll">
-              {chat.length === 0 && <Empty>Be the first to say hello.</Empty>}
+              {chat.length === 0 && <Empty>{t('home.be_first_greeting')}</Empty>}
               {chat.map((m) => (
                 <div key={m.id} className="chat-msg">
                   <span className={`who ${m.vip_tier > 0 ? 'vip' : ''}`}>{m.username}</span>
@@ -188,7 +188,7 @@ export default function Home() {
               {promos.built_in?.signup_bonus > 0 && (
                 <div className="alert alert-info">
                   <strong>{fmtCents(promos.built_in.signup_bonus)} sign-up bonus</strong>
-                  <div className="tiny">Credited the moment you register.</div>
+                  <div className="tiny">{t('home.signup_bonus_note')}</div>
                 </div>
               )}
               {(promos.promotions || []).map((p) => (

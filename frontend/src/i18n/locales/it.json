@@ -71,7 +71,10 @@
     "verified_honest": "Verificato: onesto",
     "verify_round": "Verifica un round di Crash",
     "vip": "VIP",
-    "your_seeds": "I tuoi seed"
+    "your_seeds": "I tuoi seed",
+    "loss_limit_note": "Le puntate vengono bloccate quando le tue perdite nette del giorno UTC raggiungono questo valore.",
+    "full_name": "Nome completo (come sul documento)",
+    "password_signout_note": "Cambiare la password disconnette tutte le altre sessioni."
   },
   "auth": {
     "accept_terms": "Ho almeno 18 anni e accetto i Termini e l'Informativa sulla privacy.",
@@ -163,6 +166,7 @@
     "max": "Max",
     "next": "Avanti",
     "none": "Nessuno",
+    "not_found": "Questa pagina non esiste.",
     "of": "di",
     "optional": "opzionale",
     "page": "Pagina",
@@ -172,6 +176,11 @@
     "saved": "Salvato",
     "verify": "Verifica",
     "withdraw": "Preleva"
+  },
+  "crash": {
+    "login_to_join": "Accedi per partecipare al round.",
+    "auto_cashout_note": "Si attiva automaticamente se la curva raggiunge il tuo obiettivo — non può attivarsi dopo lo scoppio.",
+    "no_players": "Ancora nessun giocatore — sii il primo."
   },
   "currency": {
     "label": "Valuta di visualizzazione"
@@ -185,7 +194,17 @@
   "games": {
     "win_chance": "Probabilità di vincita",
     "payout_on_win": "Vincita in caso di successo",
-    "profit_on_win": "Profitto in caso di vincita"
+    "profit_on_win": "Profitto in caso di vincita",
+    "press_deal": "Premi distribuisci per iniziare una mano",
+    "keno_pick": "Scegli da 1 a 10 numeri su 80. Ne vengono estratti 20.",
+    "keno_legend": "Giallo = le tue scelte · viola = estratti · verde = indovinato"
+  },
+  "home": {
+    "contributed_from_wager": "Alimentato da ogni puntata",
+    "crash_tagline": "Round live condiviso. Incassa prima che la curva esploda.",
+    "no_wins_24h": "Ancora nessuna vincita nelle ultime 24 ore.",
+    "be_first_greeting": "Sii il primo a salutare.",
+    "signup_bonus_note": "Accreditato nel momento in cui ti registri."
   },
   "kinds": {
     "admin_adjustment": "Rettifica",
@@ -206,6 +225,9 @@
   "lang": {
     "label": "Lingua"
   },
+  "leaderboard": {
+    "masking_note": "I nomi utente sono parzialmente oscurati. Sono mostrati solo moltiplicatori e vincite delle ultime 24 ore."
+  },
   "legal": {
     "terms": "Termini",
     "privacy": "Privacy",
@@ -223,6 +245,9 @@
     "promotions": "Promozioni",
     "support": "Assistenza",
     "wallet": "Portafoglio"
+  },
+  "promotions": {
+    "none_running": "Al momento non ci sono promozioni attive."
   },
   "status": {
     "approved": "Approvato",

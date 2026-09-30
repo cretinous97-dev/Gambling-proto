@@ -67,7 +67,10 @@
     "verified_honest": "验证通过：公平",
     "verify_round": "验证一局 Crash",
     "vip": "VIP",
-    "your_seeds": "你的种子"
+    "your_seeds": "你的种子",
+    "loss_limit_note": "当 UTC 当日净亏损达到该值时，将禁止下注。",
+    "full_name": "全名（与证件一致）",
+    "password_signout_note": "修改密码会退出所有其他会话。"
   },
   "auth": {
     "accept_terms": "我已年满18岁，并接受条款与隐私政策。",
@@ -159,6 +162,7 @@
     "max": "最大",
     "next": "下一页",
     "none": "无",
+    "not_found": "该页面不存在。",
     "of": "/",
     "optional": "可选",
     "page": "页",
@@ -168,6 +172,11 @@
     "saved": "已保存",
     "verify": "验证",
     "withdraw": "提现"
+  },
+  "crash": {
+    "login_to_join": "登录后加入回合。",
+    "auto_cashout_note": "曲线达到目标时自动兑现——暴涨后无法触发。",
+    "no_players": "还没有玩家——来抢第一。"
   },
   "currency": {
     "label": "显示货币"
@@ -181,7 +190,17 @@
   "games": {
     "win_chance": "获胜几率",
     "payout_on_win": "获胜派彩",
-    "profit_on_win": "获胜盈利"
+    "profit_on_win": "获胜盈利",
+    "press_deal": "点击发牌开始一局",
+    "keno_pick": "从 80 个数字中选 1–10 个，开出 20 个。",
+    "keno_legend": "黄色 = 你的选择 · 紫色 = 已开出 · 绿色 = 命中"
+  },
+  "home": {
+    "contributed_from_wager": "来自每一笔下注",
+    "crash_tagline": "共享实时回合。在曲线暴涨前兑现。",
+    "no_wins_24h": "过去 24 小时内暂无中奖。",
+    "be_first_greeting": "来抢沙发吧。",
+    "signup_bonus_note": "注册即入账。"
   },
   "kinds": {
     "admin_adjustment": "调整",
@@ -202,6 +221,9 @@
   "lang": {
     "label": "语言"
   },
+  "leaderboard": {
+    "masking_note": "用户名已部分隐藏。仅显示过去 24 小时内的倍数和派彩。"
+  },
   "legal": {
     "terms": "条款",
     "privacy": "隐私",
@@ -219,6 +241,9 @@
     "promotions": "优惠",
     "support": "客服",
     "wallet": "钱包"
+  },
+  "promotions": {
+    "none_running": "当前没有进行中的活动。"
   },
   "status": {
     "approved": "已批准",

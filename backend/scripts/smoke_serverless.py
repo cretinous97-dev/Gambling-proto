@@ -104,6 +104,12 @@ from app.config import settings  # noqa: E402  (import after env is set)
 check("database lives under /tmp, the only writable path",
       "/tmp/" in settings.database_url, settings.database_url)
 check("demo mode is on", settings.demo_mode is True)
+# ...and that it is on because the balances really do reset, not because the
+# deployment is serverless. A production Vercel deployment with DATABASE_URL
+# set persists its balances, and telling those players their money is not real
+# would be a lie in the one direction that matters.
+check("demo mode follows the database, not the platform",
+      settings.demo_mode == settings.persistence_is_temporary)
 check("production env is not treated as a live casino", settings.is_production is False)
 check("balances are known to be temporary", settings.persistence_is_temporary is True)
 check("a throwaway signing key was minted", settings.ephemeral_secret_key is True)

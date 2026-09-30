@@ -69,7 +69,10 @@
     "verified_honest": "Verifiziert: fair",
     "verify_round": "Eine Crash-Runde prüfen",
     "vip": "VIP",
-    "your_seeds": "Deine Seeds"
+    "your_seeds": "Deine Seeds",
+    "loss_limit_note": "Sobald deine Nettoverluste des UTC-Tages diesen Wert erreichen, wird das Wetten gesperrt.",
+    "full_name": "Vollständiger Name (wie im Dokument)",
+    "password_signout_note": "Beim Ändern des Passworts werden alle anderen Sitzungen beendet."
   },
   "auth": {
     "accept_terms": "Ich bin mindestens 18 Jahre alt und akzeptiere die AGB und die Datenschutzerklärung.",
@@ -161,6 +164,7 @@
     "max": "Max.",
     "next": "Weiter",
     "none": "Keine",
+    "not_found": "Diese Seite gibt es nicht.",
     "of": "von",
     "optional": "optional",
     "page": "Seite",
@@ -170,6 +174,11 @@
     "saved": "Gespeichert",
     "verify": "Prüfen",
     "withdraw": "Auszahlen"
+  },
+  "crash": {
+    "login_to_join": "Melde dich an, um an der Runde teilzunehmen.",
+    "auto_cashout_note": "Löst automatisch aus, wenn die Kurve dein Ziel erreicht — nach dem Platzen nicht mehr.",
+    "no_players": "Noch keine Spieler — sei die erste Person."
   },
   "currency": {
     "label": "Anzeigewährung"
@@ -183,7 +192,17 @@
   "games": {
     "win_chance": "Gewinnchance",
     "payout_on_win": "Auszahlung bei Gewinn",
-    "profit_on_win": "Gewinn bei Erfolg"
+    "profit_on_win": "Gewinn bei Erfolg",
+    "press_deal": "Drücke Geben, um eine Hand zu beginnen",
+    "keno_pick": "Wähle 1–10 Zahlen aus 80. Es werden 20 gezogen.",
+    "keno_legend": "Gelb = deine Tipps · Violett = gezogen · Grün = Treffer"
+  },
+  "home": {
+    "contributed_from_wager": "Aus jedem Einsatz gespeist",
+    "crash_tagline": "Gemeinsame Live-Runde. Steig aus, bevor die Kurve platzt.",
+    "no_wins_24h": "Noch keine Gewinne in den letzten 24 Stunden.",
+    "be_first_greeting": "Sei die erste Person, die Hallo sagt.",
+    "signup_bonus_note": "Wird gutgeschrieben, sobald du dich registrierst."
   },
   "kinds": {
     "admin_adjustment": "Korrektur",
@@ -204,6 +223,9 @@
   "lang": {
     "label": "Sprache"
   },
+  "leaderboard": {
+    "masking_note": "Benutzernamen sind teilweise maskiert. Es werden nur Multiplikatoren und Auszahlungen der letzten 24 Stunden angezeigt."
+  },
   "legal": {
     "terms": "Bedingungen",
     "privacy": "Datenschutz",
@@ -221,6 +243,9 @@
     "promotions": "Aktionen",
     "support": "Support",
     "wallet": "Guthaben"
+  },
+  "promotions": {
+    "none_running": "Derzeit laufen keine Aktionen."
   },
   "status": {
     "approved": "Genehmigt",

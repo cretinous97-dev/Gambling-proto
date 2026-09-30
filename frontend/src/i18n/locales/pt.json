@@ -71,7 +71,10 @@
     "verified_honest": "Verificado: honesto",
     "verify_round": "Verificar uma rodada de Crash",
     "vip": "VIP",
-    "your_seeds": "Suas sementes"
+    "your_seeds": "Suas sementes",
+    "loss_limit_note": "As apostas são bloqueadas quando suas perdas líquidas do dia UTC atingem este valor.",
+    "full_name": "Nome completo (como no documento)",
+    "password_signout_note": "Alterar sua senha encerra todas as outras sessões."
   },
   "auth": {
     "accept_terms": "Tenho 18 anos ou mais e aceito os Termos e a Política de Privacidade.",
@@ -163,6 +166,7 @@
     "max": "Máx.",
     "next": "Seguinte",
     "none": "Nenhum",
+    "not_found": "Essa página não existe.",
     "of": "de",
     "optional": "opcional",
     "page": "Página",
@@ -172,6 +176,11 @@
     "saved": "Salvo",
     "verify": "Verificar",
     "withdraw": "Sacar"
+  },
+  "crash": {
+    "login_to_join": "Entre para participar da rodada.",
+    "auto_cashout_note": "Dispara automaticamente se a curva atingir seu alvo — não dispara depois do estouro.",
+    "no_players": "Ainda não há jogadores — seja o primeiro."
   },
   "currency": {
     "label": "Moeda de visualização"
@@ -185,7 +194,17 @@
   "games": {
     "win_chance": "Chance de ganhar",
     "payout_on_win": "Pagamento ao ganhar",
-    "profit_on_win": "Lucro ao ganhar"
+    "profit_on_win": "Lucro ao ganhar",
+    "press_deal": "Pressione distribuir para iniciar uma mão",
+    "keno_pick": "Escolha de 1 a 10 números entre 80. São sorteados 20.",
+    "keno_legend": "Amarelo = suas escolhas · roxo = sorteados · verde = acerto"
+  },
+  "home": {
+    "contributed_from_wager": "Contribuído de cada aposta",
+    "crash_tagline": "Rodada ao vivo compartilhada. Saque antes de a curva estourar.",
+    "no_wins_24h": "Ainda não há ganhos nas últimas 24 horas.",
+    "be_first_greeting": "Seja o primeiro a dizer olá.",
+    "signup_bonus_note": "Creditado no momento em que você se registra."
   },
   "kinds": {
     "admin_adjustment": "Ajuste",
@@ -206,6 +225,9 @@
   "lang": {
     "label": "Idioma"
   },
+  "leaderboard": {
+    "masking_note": "Os nomes de usuário são parcialmente mascarados. Apenas multiplicadores e pagamentos das últimas 24 horas são exibidos."
+  },
   "legal": {
     "terms": "Termos",
     "privacy": "Privacidade",
@@ -223,6 +245,9 @@
     "promotions": "Promoções",
     "support": "Suporte",
     "wallet": "Carteira"
+  },
+  "promotions": {
+    "none_running": "Não há promoções ativas no momento."
   },
   "status": {
     "approved": "Aprovado",

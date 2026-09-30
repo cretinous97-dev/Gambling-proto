@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Alert, Card } from '../../components/ui.jsx'
 import { useBetSubmit } from './useBet.js'
 import StakeRow from './StakeRow.jsx'
@@ -20,6 +21,7 @@ const PAYTABLE = {
 }
 
 export default function Keno({ minBet, maxBet, onSettled }) {
+  const { t } = useTranslation()
   const [stake, setStake] = useState('1.00')
   const [picks, setPicks] = useState([1, 7, 13, 22, 30])
   const [bet, setBet] = useState(null)
@@ -51,7 +53,7 @@ export default function Keno({ minBet, maxBet, onSettled }) {
 
       <Card>
         <div className="row between" style={{ marginBottom: 10 }}>
-          <div className="small muted">Pick 1–10 numbers from 80. 20 are drawn.</div>
+          <div className="small muted">{t('games.keno_pick')}</div>
           <div className="row" style={{ gap: 6 }}>
             <button className="btn btn-sm" onClick={random}>Random</button>
             <button className="btn btn-sm btn-ghost" onClick={clear}>Clear</button>
@@ -88,7 +90,7 @@ export default function Keno({ minBet, maxBet, onSettled }) {
         </div>
 
         <div className="row between tiny muted" style={{ marginTop: 10 }}>
-          <span>Yellow = your picks · purple = drawn · green = hit</span>
+          <span>{t('games.keno_legend')}</span>
           <span>{picks.length} selected</span>
         </div>
 

@@ -55,7 +55,7 @@ export default function Promotions() {
         ))}
 
         {(data.promotions || []).length === 0 && b.first_deposit_pct <= 0 && b.signup_bonus <= 0 && (
-          <Card><Empty>No promotions are running right now.</Empty></Card>
+          <Card><Empty>{t('promotions.none_running')}</Empty></Card>
         )}
       </div>
 

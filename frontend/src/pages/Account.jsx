@@ -204,7 +204,7 @@ export default function Account() {
               <input inputMode="decimal" value={limitForm.loss_limit_daily}
                 onChange={(e) => setLimitForm((f) => ({ ...f, loss_limit_daily: e.target.value.replace(/[^0-9.]/g, '') }))}
                 placeholder={t('account.no_limit')} />
-              <span className="tiny muted">Betting is blocked once your net losses for the UTC day reach this.</span>
+              <span className="tiny muted">{t('account.loss_limit_note')}</span>
             </div>
             <div className="field">
               <label>{t('account.daily_deposit_limit', { currency })}</label>
@@ -287,7 +287,7 @@ export default function Account() {
             ) : (
               <form onSubmit={submitKyc}>
                 <div className="field">
-                  <label>Full name (as on the document)</label>
+                  <label>{t('account.full_name')}</label>
                   <input value={kycForm.full_name} required
                     onChange={(e) => setKycForm((f) => ({ ...f, full_name: e.target.value }))} />
                 </div>
@@ -434,7 +434,7 @@ export default function Account() {
             </div>
             <button className="btn btn-primary" disabled={busy}>{t('account.change_password')}</button>
             <p className="tiny muted" style={{ marginTop: 10 }}>
-              Changing your password signs out every other session.
+              {t('account.password_signout_note')}
             </p>
           </form>
         </Card>

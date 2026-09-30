@@ -69,7 +69,10 @@
     "verified_honest": "Verified honest",
     "verify_round": "Verify a crash round",
     "vip": "VIP",
-    "your_seeds": "Your seeds"
+    "your_seeds": "Your seeds",
+    "loss_limit_note": "Betting is blocked once your net losses for the UTC day reach this.",
+    "full_name": "Full name (as on the document)",
+    "password_signout_note": "Changing your password signs out every other session."
   },
   "auth": {
     "accept_terms": "I am 18 or older and I accept the Terms and Privacy Policy.",
@@ -161,6 +164,7 @@
     "max": "Max",
     "next": "Next",
     "none": "None",
+    "not_found": "That page does not exist.",
     "of": "of",
     "optional": "optional",
     "page": "Page",
@@ -170,6 +174,11 @@
     "saved": "Saved",
     "verify": "Verify",
     "withdraw": "Withdraw"
+  },
+  "crash": {
+    "login_to_join": "Log in to join the round.",
+    "auto_cashout_note": "Fires automatically if the curve reaches your target — it cannot fire after the bust.",
+    "no_players": "No players yet — be first."
   },
   "currency": {
     "label": "Display currency"
@@ -183,7 +192,17 @@
   "games": {
     "win_chance": "Win chance",
     "payout_on_win": "Payout on win",
-    "profit_on_win": "Profit on win"
+    "profit_on_win": "Profit on win",
+    "press_deal": "Press deal to start a hand",
+    "keno_pick": "Pick 1–10 numbers from 80. 20 are drawn.",
+    "keno_legend": "Yellow = your picks · purple = drawn · green = hit"
+  },
+  "home": {
+    "contributed_from_wager": "Contributed from every wager",
+    "crash_tagline": "Shared live round. Cash out before the curve busts.",
+    "no_wins_24h": "No wins in the last 24 hours yet.",
+    "be_first_greeting": "Be the first to say hello.",
+    "signup_bonus_note": "Credited the moment you register."
   },
   "kinds": {
     "admin_adjustment": "Adjustment",
@@ -204,6 +223,9 @@
   "lang": {
     "label": "Language"
   },
+  "leaderboard": {
+    "masking_note": "Usernames are partially masked. Only multipliers and payouts from the last 24 hours are shown."
+  },
   "legal": {
     "terms": "Terms",
     "privacy": "Privacy",
@@ -221,6 +243,9 @@
     "promotions": "Promotions",
     "support": "Support",
     "wallet": "Wallet"
+  },
+  "promotions": {
+    "none_running": "No promotions are running right now."
   },
   "status": {
     "approved": "Approved",

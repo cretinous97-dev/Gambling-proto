@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+import os
 
 import pytest
 
@@ -478,3 +479,79 @@ def test_the_500_page_route_exists_for_the_site():
     source = (ROOT / "backend" / "app" / "main.py").read_text()
     assert '"/api/site"' in source and "/api/site/{asset_path:path}" in source
     assert "def frontend_dist()" in source, "the dist resolver is missing"
+
+
+# ---------------------------------------------------------------------------
+# demo mode
+# ---------------------------------------------------------------------------
+def _settings(monkeypatch, *, serverless, database_url, demo_mode=None, environment=None):
+    """Build a Settings for a given deployment shape.
+
+    Constructed directly rather than by reloading `app.config`. Reloading looks
+    tidier and is wrong: it replaces the module's `settings` object, so every
+    other test module that did `from app.config import settings` at import time
+    is left patching a different object from the one the application code reads.
+    That is a real failure - it silently un-caps `max_win_usd` in test_flows -
+    and it is invisible until something downstream asserts on a number.
+
+    `_env_file=None` skips dotenv, so a developer's own `backend/.env` cannot
+    satisfy an assertion about what happens when a value is absent.
+    """
+    from app.config import Settings
+
+    for key in ("SERVERLESS", "DEMO_MODE", "ENVIRONMENT", "VERCEL_ENV"):
+        monkeypatch.delenv(key, raising=False)
+    if demo_mode is not None:
+        monkeypatch.setenv("DEMO_MODE", str(demo_mode))
+    if environment is not None:
+        monkeypatch.setenv("ENVIRONMENT", environment)
+
+    return Settings(
+        _env_file=None,
+        serverless=serverless,
+        database_url=database_url,
+        secret_key="x" * 48,          # keep the production guard out of the way
+    )
+
+
+def test_a_serverless_deploy_with_a_real_database_is_not_a_demo(monkeypatch):
+    """The banner must not tell paying players their money is not real.
+
+    Demo mode used to be set for every serverless deploy, so a Vercel
+    production deployment with PostgreSQL configured - the configuration the
+    README asks for - still announced itself as a test deployment and put a
+    "demo" badge beside the player's balance, with no way to turn it off.
+    """
+    settings = _settings(
+        monkeypatch, serverless=True, database_url="postgresql://u:p@db.example.com/casino",
+    )
+    assert settings.persistence_is_temporary is False
+    assert settings.demo_mode is False, (
+        "a serverless deploy whose balances persist was still flagged as a demo, "
+        "so the site tells players their money is not real"
+    )
+
+
+def test_a_serverless_deploy_that_loses_balances_is_still_a_demo(monkeypatch):
+    """Without DATABASE_URL the balances reset, and the banner says so."""
+    settings = _settings(monkeypatch, serverless=True, database_url="")
+    assert "/tmp/" in settings.database_url
+    assert settings.persistence_is_temporary is True
+    assert settings.demo_mode is True
+
+
+def test_demo_mode_can_be_forced_either_way(monkeypatch):
+    """An operator who knows what they want gets it."""
+    on = _settings(
+        monkeypatch, serverless=True, database_url="postgresql://u:p@db/casino", demo_mode="true",
+    )
+    assert on.demo_mode is True
+
+    off = _settings(monkeypatch, serverless=True, database_url="", demo_mode="false")
+    assert off.demo_mode is False
+
+
+def test_a_local_development_server_is_not_flagged_as_a_demo(monkeypatch):
+    settings = _settings(monkeypatch, serverless=False, database_url="sqlite:///./data/casino.db")
+    assert settings.serverless is False
+    assert settings.demo_mode is False
