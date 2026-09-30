@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { useStore } from '../lib/store.jsx'
 import { Alert, Card } from '../components/ui.jsx'
 import { countryOptions } from '../lib/countries.js'
@@ -48,7 +48,7 @@ export default function Register() {
 
   return (
     <div className="page narrow">
-      <Card title="Create your account">
+      <Card title={t('auth.create_title')}>
         {error && <Alert kind="error">{error}</Alert>}
 
         {config?.bonuses?.first_deposit_pct > 0 && (
@@ -67,14 +67,14 @@ export default function Register() {
           <div className="field">
             <label>{t('auth.username')}</label>
             <input value={form.username} onChange={set('username')} required minLength={3} maxLength={32}
-              placeholder="letters, digits, _ and -" />
+              placeholder={t('auth.username_hint')} />
           </div>
 
           <div className="field">
             <label>{t('auth.password')}</label>
             <input type="password" value={form.password} onChange={set('password')} required minLength={8}
               autoComplete="new-password" />
-            <span className="tiny muted">At least 8 characters. Use a password manager.</span>
+            <span className="tiny muted">{t('auth.password_hint')}</span>
           </div>
 
           <div className="row" style={{ gap: 12 }}>
@@ -103,9 +103,32 @@ export default function Register() {
             <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
               <input type="checkbox" checked={form.accepts_terms} onChange={set('accepts_terms')} required />
               <span className="small">
-                I am 18 or older, I accept the <Link to="/legal/terms">Terms</Link> and{' '}
-                <Link to="/legal/privacy">Privacy Policy</Link>, and I understand the{' '}
-                <Link to="/legal/responsible-gambling">responsible gambling</Link> tools available to me.
+                {/* Three links live inside this sentence, and their position
+                    differs by language ("acepto los Términos y la Política de
+                    privacidad" vs "I accept the Terms and the Privacy Policy").
+                    Splitting it into concatenated fragments would read as broken
+                    grammar in any language that reorders them, so the sentence
+                    stays whole in the locale file and the links are interpolated
+                    into it.
+
+                    The indices are positions in `components` below, NOT in the
+                    JSX - react-i18next numbers JSX children, and a `{' '}` is a
+                    child, so the numbers shift the moment someone reformats the
+                    line. The link labels are {{placeholders}}, which the i18n
+                    checker already verifies are present in all nine locales. */}
+                <Trans
+                  i18nKey="auth.terms_consent"
+                  components={[
+                    <Link to="/legal/terms" />,
+                    <Link to="/legal/privacy" />,
+                    <Link to="/legal/responsible-gambling" />,
+                  ]}
+                  values={{
+                    terms: t('legal.terms'),
+                    privacy: t('legal.privacy'),
+                    rg: t('account.responsible'),
+                  }}
+                />
               </span>
             </label>
           </div>

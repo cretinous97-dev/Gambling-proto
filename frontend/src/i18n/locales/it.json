@@ -88,7 +88,10 @@
     "signin": "Accedi",
     "signup": "Crea account",
     "username": "Nome utente",
-    "welcome_back": "Bentornato"
+    "welcome_back": "Bentornato",
+    "username_hint": "lettere, cifre, _ e -",
+    "password_hint": "Almeno 8 caratteri. Usa un gestore di password.",
+    "terms_consent": "Ho 18 anni o più, accetto i <0>{{terms}}</0> e la <1>{{privacy}}</1>, e comprendo gli strumenti di <2>{{rg}}</2> a mia disposizione."
   },
   "banner": {
     "demo": "Distribuzione di test — i saldi non sono denaro reale e possono azzerarsi.",
@@ -116,7 +119,8 @@
     "stake": "Puntata",
     "title": "Le mie puntate",
     "wagered": "Puntato",
-    "when": "Quando"
+    "when": "Quando",
+    "player": "Giocatore"
   },
   "brand": {
     "tagline": "Gioca. Vinci. Ritira."
@@ -178,6 +182,11 @@
     "welcome": "Bentornato, {{username}}",
     "your_balance": "Il tuo saldo"
   },
+  "games": {
+    "win_chance": "Probabilità di vincita",
+    "payout_on_win": "Vincita in caso di successo",
+    "profit_on_win": "Profitto in caso di vincita"
+  },
   "kinds": {
     "admin_adjustment": "Rettifica",
     "bet_payout": "Vincita",
@@ -196,6 +205,11 @@
   },
   "lang": {
     "label": "Lingua"
+  },
+  "legal": {
+    "terms": "Termini",
+    "privacy": "Privacy",
+    "aml": "Antiriciclaggio / KYC"
   },
   "nav": {
     "account": "Account",

@@ -88,7 +88,10 @@
     "signin": "Iniciar sesión",
     "signup": "Crear cuenta",
     "username": "Usuario",
-    "welcome_back": "Bienvenido de nuevo"
+    "welcome_back": "Bienvenido de nuevo",
+    "username_hint": "letras, dígitos, _ y -",
+    "password_hint": "Al menos 8 caracteres. Usa un gestor de contraseñas.",
+    "terms_consent": "Tengo 18 años o más, acepto los <0>{{terms}}</0> y la <1>{{privacy}}</1>, y entiendo las herramientas de <2>{{rg}}</2> a mi disposición."
   },
   "banner": {
     "demo": "Despliegue de prueba: los saldos no son dinero real y pueden reiniciarse.",
@@ -116,7 +119,8 @@
     "stake": "Apuesta",
     "title": "Mis apuestas",
     "wagered": "Apostado",
-    "when": "Cuándo"
+    "when": "Cuándo",
+    "player": "Jugador"
   },
   "brand": {
     "tagline": "Juega. Gana. Retira."
@@ -178,6 +182,11 @@
     "welcome": "Bienvenido de nuevo, {{username}}",
     "your_balance": "Tu saldo"
   },
+  "games": {
+    "win_chance": "Probabilidad de ganar",
+    "payout_on_win": "Pago al ganar",
+    "profit_on_win": "Beneficio al ganar"
+  },
   "kinds": {
     "admin_adjustment": "Ajuste",
     "bet_payout": "Ganancia",
@@ -196,6 +205,11 @@
   },
   "lang": {
     "label": "Idioma"
+  },
+  "legal": {
+    "terms": "Términos",
+    "privacy": "Privacidad",
+    "aml": "PBC / KYC"
   },
   "nav": {
     "account": "Cuenta",

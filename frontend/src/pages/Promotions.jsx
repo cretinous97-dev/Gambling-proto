@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api.js'
 import { fmtCents } from '../lib/format.js'
 import { Alert, Card, Empty, Loading } from '../components/ui.jsx'
 import { Link } from 'react-router-dom'
 
 export default function Promotions() {
+  const { t } = useTranslation()
   const [data, setData] = useState(null)
   useEffect(() => { api.promotions().then(setData) }, [])
   if (!data) return <div className="page"><Loading /></div>
@@ -12,7 +14,7 @@ export default function Promotions() {
   const b = data.built_in
   return (
     <div className="page medium">
-      <h1 style={{ marginTop: 0 }}>Promotions</h1>
+      <h1 style={{ marginTop: 0 }}>{t('nav.promotions')}</h1>
       <Alert kind="warn">
         Every bonus carries a playthrough requirement, is non-withdrawable until it is met, and
         expires after 30 days. Game contributions differ — slots count 100%, blackjack only 10%.
@@ -36,7 +38,7 @@ export default function Promotions() {
             <p className="small muted">
               {fmtCents(b.signup_bonus)} credited automatically when you create an account.
             </p>
-            <Link className="btn" to="/register">Create account</Link>
+            <Link className="btn" to="/register">{t('auth.signup')}</Link>
           </Card>
         )}
 

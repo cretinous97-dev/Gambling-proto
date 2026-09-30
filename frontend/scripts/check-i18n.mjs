@@ -20,6 +20,8 @@
  *   4. Nothing is left in English by accident - a long string that is
  *      byte-identical to the English source is almost always a copy-paste
  *      that was never translated.
+ *   5. Rich-text tag parity - a translation of a sentence containing links
+ *      must keep every `<0>`/`<1>` tag, or a link vanishes from the sentence.
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -60,6 +62,11 @@ function splitPlural(key) {
 
 function placeholders(text) {
   return [...text.matchAll(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g)].map((m) => m[1]).sort()
+}
+
+/** Numbered rich-text tags, as `<Trans>` uses them: `<0>`, `</2>`. */
+function richTags(text) {
+  return [...text.matchAll(/<(\/?)(\d+)>/g)].map((m) => `${m[1]}${m[2]}`).sort()
 }
 
 function pluralCategories(locale) {
@@ -144,6 +151,21 @@ for (const locale of locales) {
     const got = placeholders(value)
     if (want.join(',') !== got.join(',')) {
       problemsHere.push(`placeholders: ${key} - en has [${want.join(', ')}], got [${got.join(', ')}]`)
+    }
+  }
+
+  // --- 5. rich-text tag parity ----------------------------------------------
+  // `<Trans>` renders a sentence with links inside it by substituting numbered
+  // tags. If a translation drops <1>, the link silently disappears - the
+  // sentence still reads, minus the thing the player was asked to agree to.
+  // Placeholder checking does not cover it, because tags are not `{{...}}`.
+  for (const [key, value] of Object.entries(locale.strings)) {
+    const expected = reference.strings[key]
+    if (expected === undefined) continue
+    const want = richTags(expected)
+    const got = richTags(value)
+    if (want.join(',') !== got.join(',')) {
+      problemsHere.push(`tags: ${key} - en has [${want.join(', ')}], got [${got.join(', ')}]`)
     }
   }
 

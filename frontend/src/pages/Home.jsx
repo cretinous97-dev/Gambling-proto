@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import { fmtCents, fmtMultiplier } from '../lib/format.js'
@@ -7,6 +8,7 @@ import GameArt from '../components/GameArt.jsx'
 import { useStore } from '../lib/store.jsx'
 
 export default function Home() {
+  const { t } = useTranslation()
   const { user, config } = useStore()
   const [catalog, setCatalog] = useState(null)
   const [jackpot, setJackpot] = useState(null)
@@ -103,7 +105,7 @@ export default function Home() {
         </picture>
         <div className="hero-veil" />
         <div className="hero-body">
-          <span className="badge badge-ok">Provably fair</span>
+          <span className="badge badge-ok">{t('account.fair')}</span>
           <h1>{config?.name || 'Naktsang Casino'}</h1>
           <p className="muted" style={{ maxWidth: 430 }}>
             Eleven games, instant settlement and a published return on every one.

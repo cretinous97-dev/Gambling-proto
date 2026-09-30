@@ -176,6 +176,15 @@ function routeFor(url) {
       player_count: 5, total_stake: 25000, players: [], your_bet: null, crash_point: 3.33,
     }
   }
+  // Promotions: `built_in` is always present on the real response, and the
+  // page reads `built_in.first_deposit_pct` unguarded. An empty object here
+  // crashed the page for a reason the server cannot produce.
+  if (path === '/api/promotions') {
+    return {
+      promotions: [],
+      built_in: { signup_bonus: 500, first_deposit_pct: 100, first_deposit_cap: 10000, wager_x: 30 },
+    }
+  }
   // Note `aml-queue` returns `queue`, not `cases`/`flagged`.
   if (path === '/api/admin/aml-queue') return { queue: [] }
   if (path === '/api/admin/withdrawals') return { withdrawals: [] }
@@ -359,6 +368,12 @@ const ES_PAGES = [
   },
   { url: 'http://localhost/es/history', h1: 'Mis apuestas', extra: ['Multiplicador', 'Cuándo', 'Origen'] },
   { url: 'http://localhost/es/checkout/dep_1', h1: 'Pago del depósito', extra: ['Ya pagué — confirmar', 'Importe'] },
+  // Pages whose literals were hardcoded English until now, even though the
+  // translations had existed in the locale files for a while. Asserting the
+  // Spanish heading is the only thing that proves the wiring, not the file.
+  { url: 'http://localhost/es/leaderboard', locale: 'es', h1: 'Clasificación', extra: ['Jugador', 'Multiplicador'] },
+  { url: 'http://localhost/es/promotions', locale: 'es', h1: 'Promociones', extra: ['Crear cuenta'] },
+  { url: 'http://localhost/es/crash', locale: 'es', h1: null, extra: [] },
 ]
 for (const page of ES_PAGES) {
   try {
@@ -368,8 +383,8 @@ for (const page of ES_PAGES) {
     const heading = w.document.querySelector('h1, .card-title, h2')?.textContent || ''
     check(
       `${page.url} renders in Spanish`,
-      text.includes(page.h1) && !/\{\{/.test(text),
-      text.includes(page.h1) ? heading.trim().slice(0, 40) : (w.__smokeErrors[0] || heading).slice(0, 220),
+      page.h1 ? text.includes(page.h1) && !/\{\{/.test(text) : true,
+      page.h1 ? (text.includes(page.h1) ? heading.trim().slice(0, 40) : (w.__smokeErrors[0] || heading).slice(0, 220)) : 'rendered',
     )
     for (const needle of page.extra) {
       check(`${page.url} shows "${needle}"`, text.includes(needle))
@@ -387,7 +402,14 @@ for (const page of ES_PAGES) {
       }
     }
     check(`${page.url} is not blank`, text.replace(/\s+/g, '').length > 200)
-    check(`${page.url} leaks no raw keys`, !/[a-z]+\.[a-z_]+_[a-z]+\s|\baccount\.|\bbets\.|\bcheckout\./.test(text))
+    // A raw key is `group.snake_case` - always lowercase with underscores. The
+    // pattern has to say that much: a looser `\baccount\.` also matches an
+    // English sentence ending in "account." followed by the next element's
+    // text, which reported a leak where the real problem was a missing
+    // translation.
+    const RENDERED_KEY = /\b(?:account|bets|checkout|auth|nav|wallet|games|legal|status|kinds)\.[a-z][a-z0-9_]*\b/g
+    check(`${page.url} leaks no raw keys`, !RENDERED_KEY.test(text),
+      (text.match(RENDERED_KEY) || []).join(' / ').slice(0, 160))
   } catch (err) {
     check(`${page.url} renders`, false, String(err).slice(0, 200))
   }
@@ -435,9 +457,44 @@ for (const page of [
       String((w.__smokeErrors || [])[0] || '').slice(0, 200),
     )
     check(`${page.url} leaks no raw keys`, !/[a-z]+\.[a-z_]+_[a-z]+\s|\bauth\.|\bcheckout\./.test(text))
+
+    if (page.url.endsWith('/register')) {
+      // The consent sentence carries three links. <Trans> substitutes them by
+      // the index positions in its `components` array, and a mismatch does not
+      // throw - the link simply disappears. So assert the links, not just the
+      // words around them.
+      const legal = [...w.document.querySelectorAll('a[href*="/legal/"]')]
+        .map((a) => a.textContent.trim())
+      const wanted = (page.locale || 'en') === 'es'
+        ? ['Términos', 'Privacidad', 'Juego responsable']
+        : ['Terms', 'Privacy', 'Responsible gambling']
+      for (const label of wanted) {
+        check(`${page.url} consent links to "${label}"`, legal.includes(label), legal.join(' | '))
+      }
+    }
   } catch (err) {
     check(`${page.url} renders`, false, String(err).slice(0, 200))
   }
+}
+
+// The consent sentence is the one place a translation has to survive being
+// reordered around its links, so it is worth rendering in a language that
+// reorders it. Spanish moves "y la" inside the clause.
+console.log('\n  — signup consent in a translated locale —')
+try {
+  const esw = await boot('http://localhost/es/register', { locale: 'es', anonymous: true })
+  if (process.env.DUMP) console.log(esw.__smokeErrors.join('\n\n'))
+  const root = esw.document.getElementById('root')
+  const text = root?.textContent || ''
+  const legal = [...root.querySelectorAll('a[href*="/legal/"]')].map((a) => a.textContent.trim())
+  check('the Spanish signup page renders', text.includes('Crear cuenta'), (esw.__smokeErrors || [])[0]?.slice(0, 160) || 'ok')
+  for (const label of ['Términos', 'Privacidad', 'Juego responsable']) {
+    check(`the Spanish consent links to "${label}"`, legal.includes(label), legal.join(' | '))
+  }
+  check('no placeholder is left unrendered', !/\{\{|<\d>/.test(text),
+    (text.match(/\{\{[^}]*\}|<\d>/g) || []).join(' '))
+} catch (err) {
+  check('the Spanish signup page renders', false, String(err).slice(0, 200))
 }
 
 // --- the landing page and the operator console ------------------------------

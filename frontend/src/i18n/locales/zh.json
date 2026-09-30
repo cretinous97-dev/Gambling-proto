@@ -84,7 +84,10 @@
     "signin": "登录",
     "signup": "注册",
     "username": "用户名",
-    "welcome_back": "欢迎回来"
+    "welcome_back": "欢迎回来",
+    "username_hint": "字母、数字、_ 和 -",
+    "password_hint": "至少 8 个字符。请使用密码管理器。",
+    "terms_consent": "我已年满 18 周岁，接受<0>{{terms}}</0>和<1>{{privacy}}</1>，并且了解可用的<2>{{rg}}</2>工具。"
   },
   "banner": {
     "demo": "测试部署——余额并非真实资金，可能会被重置。",
@@ -112,7 +115,8 @@
     "stake": "投注额",
     "title": "我的投注",
     "wagered": "已投注",
-    "when": "时间"
+    "when": "时间",
+    "player": "玩家"
   },
   "brand": {
     "tagline": "畅玩 · 赢取 · 提现"
@@ -174,6 +178,11 @@
     "welcome": "欢迎回来，{{username}}",
     "your_balance": "您的余额"
   },
+  "games": {
+    "win_chance": "获胜几率",
+    "payout_on_win": "获胜派彩",
+    "profit_on_win": "获胜盈利"
+  },
   "kinds": {
     "admin_adjustment": "调整",
     "bet_payout": "派彩",
@@ -192,6 +201,11 @@
   },
   "lang": {
     "label": "语言"
+  },
+  "legal": {
+    "terms": "条款",
+    "privacy": "隐私",
+    "aml": "反洗钱 / KYC"
   },
   "nav": {
     "account": "账户",

@@ -262,10 +262,10 @@ export default function AppShell() {
 
       <footer className="border-t border-line px-4 py-6 text-center text-xs text-muted">
         <div className="mb-2 flex flex-wrap justify-center gap-4">
-          <Link to="/legal/terms">Terms</Link>
-          <Link to="/legal/privacy">Privacy</Link>
-          <Link to="/legal/responsible-gambling">Responsible Gambling</Link>
-          <Link to="/legal/aml">AML / KYC</Link>
+          <Link to="/legal/terms">{t('legal.terms')}</Link>
+          <Link to="/legal/privacy">{t('legal.privacy')}</Link>
+          <Link to="/legal/responsible-gambling">{t('account.responsible')}</Link>
+          <Link to="/legal/aml">{t('legal.aml')}</Link>
         </div>
         <p className="mx-auto max-w-2xl">
           18+. Gambling involves risk and is not a way to make money. Games are provably

@@ -88,7 +88,10 @@
     "signin": "Entrar",
     "signup": "Criar conta",
     "username": "Nome de utilizador",
-    "welcome_back": "Bem-vindo de volta"
+    "welcome_back": "Bem-vindo de volta",
+    "username_hint": "letras, dígitos, _ e -",
+    "password_hint": "Pelo menos 8 caracteres. Use um gerenciador de senhas.",
+    "terms_consent": "Tenho 18 anos ou mais, aceito os <0>{{terms}}</0> e a <1>{{privacy}}</1>, e entendo as ferramentas de <2>{{rg}}</2> à minha disposição."
   },
   "banner": {
     "demo": "Implementação de teste — os saldos não são dinheiro real e podem ser reiniciados.",
@@ -116,7 +119,8 @@
     "stake": "Aposta",
     "title": "Minhas apostas",
     "wagered": "Apostado",
-    "when": "Quando"
+    "when": "Quando",
+    "player": "Jogador"
   },
   "brand": {
     "tagline": "Jogue. Ganhe. Saque."
@@ -178,6 +182,11 @@
     "welcome": "Bem-vindo de volta, {{username}}",
     "your_balance": "O seu saldo"
   },
+  "games": {
+    "win_chance": "Chance de ganhar",
+    "payout_on_win": "Pagamento ao ganhar",
+    "profit_on_win": "Lucro ao ganhar"
+  },
   "kinds": {
     "admin_adjustment": "Ajuste",
     "bet_payout": "Ganho",
@@ -196,6 +205,11 @@
   },
   "lang": {
     "label": "Idioma"
+  },
+  "legal": {
+    "terms": "Termos",
+    "privacy": "Privacidade",
+    "aml": "PLD / KYC"
   },
   "nav": {
     "account": "Conta",

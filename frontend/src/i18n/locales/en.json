@@ -86,7 +86,10 @@
     "signin": "Sign in",
     "signup": "Create account",
     "username": "Username",
-    "welcome_back": "Welcome back"
+    "welcome_back": "Welcome back",
+    "username_hint": "letters, digits, _ and -",
+    "password_hint": "At least 8 characters. Use a password manager.",
+    "terms_consent": "I am 18 or older, I accept the <0>{{terms}}</0> and the <1>{{privacy}}</1>, and I understand the <2>{{rg}}</2> tools available to me."
   },
   "banner": {
     "demo": "Test deployment — balances are not real money and may reset.",
@@ -114,7 +117,8 @@
     "stake": "Stake",
     "title": "My bets",
     "wagered": "Wagered",
-    "when": "When"
+    "when": "When",
+    "player": "Player"
   },
   "brand": {
     "tagline": "Play. Win. Withdraw."
@@ -176,6 +180,11 @@
     "welcome": "Welcome back, {{username}}",
     "your_balance": "Your balance"
   },
+  "games": {
+    "win_chance": "Win chance",
+    "payout_on_win": "Payout on win",
+    "profit_on_win": "Profit on win"
+  },
   "kinds": {
     "admin_adjustment": "Adjustment",
     "bet_payout": "Win",
@@ -194,6 +203,11 @@
   },
   "lang": {
     "label": "Language"
+  },
+  "legal": {
+    "terms": "Terms",
+    "privacy": "Privacy",
+    "aml": "AML / KYC"
   },
   "nav": {
     "account": "Account",

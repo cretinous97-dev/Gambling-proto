@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Link, useParams } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import { fmtCents, fmtMultiplier, GAME_ICONS } from '../lib/format.js'
@@ -30,6 +31,7 @@ const PANELS = {
 }
 
 export default function GameRoom() {
+  const { t } = useTranslation()
   const { slug } = useParams()
   const { config, isAuthed, refreshWallet } = useStore()
   const [meta, setMeta] = useState(null)
@@ -107,8 +109,8 @@ export default function GameRoom() {
         <Card>
           <p className="muted">Log in or create an account to play {meta.name}.</p>
           <div className="row">
-            <Link className="btn btn-primary" to="/register">Create account</Link>
-            <Link className="btn" to="/login">Log in</Link>
+            <Link className="btn btn-primary" to="/register">{t('auth.signup')}</Link>
+            <Link className="btn" to="/login">{t('auth.signin')}</Link>
           </div>
         </Card>
       ) : (

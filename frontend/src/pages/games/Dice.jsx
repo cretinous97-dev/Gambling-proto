@@ -1,5 +1,7 @@
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Alert, Card } from '../../components/ui.jsx'
+import { fmtCents } from '../../lib/format.js'
 import { useBetSubmit } from './useBet.js'
 import StakeRow from './StakeRow.jsx'
 import { ResultBanner, ProvablyFairNote } from '../GameRoom.jsx'
@@ -10,6 +12,7 @@ import { ResultBanner, ProvablyFairNote } from '../GameRoom.jsx'
  * same formula, and the server's answer always wins.
  */
 export default function Dice({ minBet, maxBet, onSettled }) {
+  const { t } = useTranslation()
   const [stake, setStake] = useState('1.00')
   const [target, setTarget] = useState(50)
   const [direction, setDirection] = useState('over')
@@ -79,9 +82,13 @@ export default function Dice({ minBet, maxBet, onSettled }) {
         </div>
 
         <div className="grid grid-3" style={{ marginTop: 16 }}>
-          <div className="stat"><span className="label">Win chance</span><span className="value">{winChance.toFixed(2)}%</span></div>
-          <div className="stat"><span className="label">Multiplier</span><span className="value">{multiplier.toFixed(4)}x</span></div>
-          <div className="stat"><span className="label">Profit on win</span><span className="value">${(potential / 100).toFixed(2)}</span></div>
+          <div className="stat"><span className="label">{t('games.win_chance')}</span><span className="value">{winChance.toFixed(2)}%</span></div>
+          <div className="stat"><span className="label">{t('bets.multiplier')}</span><span className="value">{multiplier.toFixed(4)}x</span></div>
+          {/* Was `${(potential / 100).toFixed(2)}` — a hardcoded dollar sign on
+              a page that renders amounts in the player's chosen currency, so a
+              BTN or EUR player saw the one figure that did not convert. Same
+              minor units, formatted by the same helper as every other game. */}
+          <div className="stat"><span className="label">{t('games.profit_on_win')}</span><span className="value">{fmtCents(potential)}</span></div>
         </div>
       </Card>
 

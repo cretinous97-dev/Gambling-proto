@@ -86,7 +86,10 @@
     "signin": "Anmelden",
     "signup": "Konto erstellen",
     "username": "Benutzername",
-    "welcome_back": "Willkommen zurück"
+    "welcome_back": "Willkommen zurück",
+    "username_hint": "Buchstaben, Ziffern, _ und -",
+    "password_hint": "Mindestens 8 Zeichen. Verwende einen Passwortmanager.",
+    "terms_consent": "Ich bin 18 Jahre oder älter, akzeptiere die <0>{{terms}}</0> und die <1>{{privacy}}</1> und verstehe die Werkzeuge zum <2>{{rg}}</2>."
   },
   "banner": {
     "demo": "Testumgebung — Salden sind kein echtes Geld und können zurückgesetzt werden.",
@@ -114,7 +117,8 @@
     "stake": "Einsatz",
     "title": "Meine Wetten",
     "wagered": "Gesetzt",
-    "when": "Wann"
+    "when": "Wann",
+    "player": "Spieler"
   },
   "brand": {
     "tagline": "Spielen. Gewinnen. Auszahlen."
@@ -176,6 +180,11 @@
     "welcome": "Willkommen zurück, {{username}}",
     "your_balance": "Ihr Guthaben"
   },
+  "games": {
+    "win_chance": "Gewinnchance",
+    "payout_on_win": "Auszahlung bei Gewinn",
+    "profit_on_win": "Gewinn bei Erfolg"
+  },
   "kinds": {
     "admin_adjustment": "Korrektur",
     "bet_payout": "Gewinn",
@@ -194,6 +203,11 @@
   },
   "lang": {
     "label": "Sprache"
+  },
+  "legal": {
+    "terms": "Bedingungen",
+    "privacy": "Datenschutz",
+    "aml": "Geldwäsche / KYC"
   },
   "nav": {
     "account": "Konto",

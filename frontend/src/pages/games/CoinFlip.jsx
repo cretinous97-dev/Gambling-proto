@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Alert, Card } from '../../components/ui.jsx'
 import { useBetSubmit } from './useBet.js'
 import StakeRow from './StakeRow.jsx'
@@ -6,6 +7,7 @@ import { ResultBanner, ProvablyFairNote } from '../GameRoom.jsx'
 import { fmtCents } from '../../lib/format.js'
 
 export default function CoinFlip({ minBet, maxBet, onSettled }) {
+  const { t } = useTranslation()
   const [stake, setStake] = useState('1.00')
   const [side, setSide] = useState('heads')
   const [bet, setBet] = useState(null)
@@ -41,9 +43,9 @@ export default function CoinFlip({ minBet, maxBet, onSettled }) {
         </div>
 
         <div className="grid grid-3" style={{ marginTop: 16 }}>
-          <div className="stat"><span className="label">Win chance</span><span className="value">50.00%</span></div>
-          <div className="stat"><span className="label">Multiplier</span><span className="value">1.98x</span></div>
-          <div className="stat"><span className="label">Payout on win</span><span className="value">{fmtCents(Math.floor(Number(stake || 0) * 100 * 1.98))}</span></div>
+          <div className="stat"><span className="label">{t('games.win_chance')}</span><span className="value">50.00%</span></div>
+          <div className="stat"><span className="label">{t('bets.multiplier')}</span><span className="value">1.98x</span></div>
+          <div className="stat"><span className="label">{t('games.payout_on_win')}</span><span className="value">{fmtCents(Math.floor(Number(stake || 0) * 100 * 1.98))}</span></div>
         </div>
       </Card>
 

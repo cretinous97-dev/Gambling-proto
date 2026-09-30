@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { api } from '../lib/api.js'
 import { fmtCents, fmtMultiplier } from '../lib/format.js'
 import { Card, Empty, Loading } from '../components/ui.jsx'
 
 export default function Leaderboard() {
+  const { t } = useTranslation()
   const [data, setData] = useState(null)
   const [rounds, setRounds] = useState([])
 
@@ -19,7 +21,7 @@ export default function Leaderboard() {
 
   return (
     <div className="page medium">
-      <h1 style={{ marginTop: 0 }}>Leaderboard</h1>
+      <h1 style={{ marginTop: 0 }}>{t('nav.leaderboard')}</h1>
       <p className="muted small">
         Usernames are partially masked. Only multipliers and payouts from the last 24 hours are shown.
       </p>
@@ -28,7 +30,7 @@ export default function Leaderboard() {
         <Card title="Biggest multipliers (24h)">
           <div className="table-wrap">
             <table>
-              <thead><tr><th>#</th><th>Player</th><th>Game</th><th style={{ textAlign: 'right' }}>Multiplier</th><th style={{ textAlign: 'right' }}>Payout</th></tr></thead>
+              <thead><tr><th>#</th><th>{t('bets.player')}</th><th>{t('bets.game')}</th><th style={{ textAlign: 'right' }}>{t('bets.multiplier')}</th><th style={{ textAlign: 'right' }}>{t('bets.payout')}</th></tr></thead>
               <tbody>
                 {(data.top_multipliers || []).map((l, i) => (
                   <tr key={i}>

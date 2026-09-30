@@ -88,7 +88,10 @@
     "signin": "Se connecter",
     "signup": "Créer un compte",
     "username": "Nom d'utilisateur",
-    "welcome_back": "Bon retour"
+    "welcome_back": "Bon retour",
+    "username_hint": "lettres, chiffres, _ et -",
+    "password_hint": "Au moins 8 caractères. Utilisez un gestionnaire de mots de passe.",
+    "terms_consent": "J'ai 18 ans ou plus, j'accepte les <0>{{terms}}</0> et la <1>{{privacy}}</1>, et je comprends les outils de <2>{{rg}}</2> à ma disposition."
   },
   "banner": {
     "demo": "Déploiement de test — les soldes ne sont pas de l'argent réel et peuvent être réinitialisés.",
@@ -116,7 +119,8 @@
     "stake": "Mise",
     "title": "Mes paris",
     "wagered": "Misé",
-    "when": "Quand"
+    "when": "Quand",
+    "player": "Joueur"
   },
   "brand": {
     "tagline": "Jouez. Gagnez. Retirez."
@@ -178,6 +182,11 @@
     "welcome": "Bon retour, {{username}}",
     "your_balance": "Votre solde"
   },
+  "games": {
+    "win_chance": "Chance de gagner",
+    "payout_on_win": "Gain en cas de victoire",
+    "profit_on_win": "Profit en cas de victoire"
+  },
   "kinds": {
     "admin_adjustment": "Ajustement",
     "bet_payout": "Gain",
@@ -196,6 +205,11 @@
   },
   "lang": {
     "label": "Langue"
+  },
+  "legal": {
+    "terms": "Conditions",
+    "privacy": "Confidentialité",
+    "aml": "LBC / KYC"
   },
   "nav": {
     "account": "Compte",
