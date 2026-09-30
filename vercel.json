@@ -1,0 +1,84 @@
+{
+  "buildCommand": "bash frontend/scripts/deploy-build.sh",
+  "installCommand": "cd frontend && npm ci",
+  "framework": null,
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "backend/**"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index?__path=/api/$1"
+    },
+    {
+      "source": "/login",
+      "destination": "/api/index?__path=/login"
+    },
+    {
+      "source": "/register",
+      "destination": "/api/index?__path=/register"
+    },
+    {
+      "source": "/wallet",
+      "destination": "/api/index?__path=/wallet"
+    },
+    {
+      "source": "/account",
+      "destination": "/api/index?__path=/account"
+    },
+    {
+      "source": "/history",
+      "destination": "/api/index?__path=/history"
+    },
+    {
+      "source": "/leaderboard",
+      "destination": "/api/index?__path=/leaderboard"
+    },
+    {
+      "source": "/promotions",
+      "destination": "/api/index?__path=/promotions"
+    },
+    {
+      "source": "/crash",
+      "destination": "/api/index?__path=/crash"
+    },
+    {
+      "source": "/admin",
+      "destination": "/api/index?__path=/admin"
+    },
+    {
+      "source": "/checkout/(.*)",
+      "destination": "/api/index?__path=/checkout/$1"
+    },
+    {
+      "source": "/legal/(.*)",
+      "destination": "/api/index?__path=/legal/$1"
+    },
+    {
+      "source": "/game/(.*)",
+      "destination": "/api/index?__path=/game/$1"
+    },
+    {
+      "source": "/admin/(.*)",
+      "destination": "/api/index?__path=/admin/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/api/index?__path=/$1"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    }
+  ],
+  "outputDirectory": "public"
+}

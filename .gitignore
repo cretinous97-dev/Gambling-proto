@@ -1,0 +1,39 @@
+# --- secrets and local config: NEVER commit these -------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# --- python ---------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# --- database: player money lives here, and it is not source code ---------
+backend/data/
+*.db
+*.db-journal
+*.sqlite3
+
+# --- node / frontend build output ----------------------------------------
+node_modules/
+dist/
+#: where the deploy build copies the built site (see frontend/scripts/deploy-build.sh)
+/backend/static/
+/public/
+.vite/
+npm-debug.log*
+yarn-error.log*
+
+# --- uploads and KYC scans -------------------------------------------------
+uploads/
+kyc/
+*.log

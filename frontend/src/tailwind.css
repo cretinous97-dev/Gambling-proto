@@ -1,0 +1,73 @@
+/*
+ * Tailwind CSS v4, layered ON TOP of the existing design system.
+ *
+ * Why `theme` and `utilities` and not a plain `@import "tailwindcss"`:
+ *
+ * Tailwind's preflight is a CSS reset. This application already has a reset and
+ * a complete set of component styles in styles.css (`.btn`, `.card`, `.badge`,
+ * the cashier, the game tables). Importing preflight would reset element
+ * defaults underneath them and change the appearance of every existing page at
+ * once - a 300-file visual regression in exchange for nothing.
+ *
+ * Importing only the theme and the utilities gives the two things that are
+ * actually wanted:
+ *
+ *   theme      - the design tokens, so `bg-panel` and `text-muted` below are
+ *                the SAME values the existing CSS uses, not a parallel palette
+ *   utilities  - the class names, so new components can be written quickly
+ *
+ * The path forward is to move component styles into utilities as pages are
+ * touched, and only then drop styles.css. Until then both work, side by side,
+ * and neither fights the other.
+ */
+
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@theme {
+  /* Palette, mirrored from the custom properties in styles.css. Keep the two
+   * in step: a token that exists in both places but with two values is worse
+   * than either one alone. */
+  --color-bg: #0a0d16;
+  --color-bg-2: #101627;
+  --color-panel: #151c30;
+  --color-panel-2: #1b2440;
+  --color-line: #243052;
+  --color-ink: #eef2ff;
+  --color-muted: #93a0c4;
+  --color-accent: #ffcc4d;
+  --color-accent-2: #7c5cff;
+  --color-ok: #35d07f;
+  --color-warn: #ffb020;
+  --color-bad: #ff5470;
+
+  --radius-card: 14px;
+
+  /* Typography scale for the dashboard shell. */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Noto Sans', 'Noto Sans Arabic', 'Noto Sans SC', sans-serif;
+}
+
+/*
+ * Logical properties, not left/right.
+ *
+ * The Arabic locale renders right-to-left, and `ml-2` / `text-left` are
+ * physical: they stay correct-looking in English and point the wrong way in
+ * Arabic. These small aliases exist so components can say `ms-2` (start) and
+ * mean it in every locale. Tailwind v4 ships `ms-*`/`ps-*` already; the
+ * aliases here are for the hand-written rules in styles.css that predate it.
+ */
+@layer utilities {
+  .rtl-flip {
+    transform: scaleX(-1);
+  }
+
+  /* A tabular, monospace-ish treatment for money. Balances must not jitter
+   * when a digit changes - and they must line up in a column. */
+  .money {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+}

@@ -1,0 +1,32 @@
+# Keep the upload small and keep local state out of the cloud build.
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Frontend dependencies and build output: Vercel installs and builds these.
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local development database - player money does not belong in a build artifact.
+backend/data/
+*.db
+*.db-journal
+
+# Tests are not needed at runtime; they run locally and in CI.
+backend/tests/
+backend/scripts/
+
+# Editor / OS noise
+.git/
+.gitignore
+.DS_Store
+*.log
+
+# Python bytecode created by the local entry-point import
+api/__pycache__/
