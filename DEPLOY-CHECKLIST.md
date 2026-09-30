@@ -59,7 +59,18 @@ what this app wants: postgresql+psycopg://user:pass@ep-xxx.neon.tech/neondb?sslm
 ```
 
 4. Add it as `DATABASE_URL` in Vercel and redeploy. Confirm by visiting
-   `/api/health` — `deployment.balances_persist` must flip to `true`.
+   `/api/health` — `deployment.balances_persist` must flip to `true`, and
+   `deployment.demo_mode` must flip to `false`.
+
+That second flag is the one that matters to your players. While it is `true`
+the site shows them *"balances are not real money and may reset"* and puts a
+DEMO badge beside the balance. It follows the database, not the platform: the
+moment the balances survive, the warning disappears on its own, because from
+then on it would be untrue. If you ever see it still on with a real
+`DATABASE_URL`, set `DEMO_MODE=false` — but it should not be necessary.
+
+The *"Sandbox payments: no real money moves"* strip is separate and keys off
+`PAYMENT_PROVIDER`; it goes away in Group C, when the money becomes real.
 
 The schema is created automatically on first request. No migrations to run.
 
