@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../lib/api.js'
 import { fmtCents } from '../lib/format.js'
@@ -25,28 +25,34 @@ export default function Checkout() {
 
   const simulation = config?.provider?.simulation
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       setDeposit(await api.deposit(depositId))
     } catch (err) {
       setError(err.message)
     }
-  }
+  }, [depositId])
 
   useEffect(() => {
     load()
-  }, [depositId])
+  }, [load])
 
   // Poll while the deposit is still open so a provider webhook shows up here
   // without the player needing to refresh.
+  //
+  // The dependency is this boolean, not `deposit`: the poll replaces the
+  // deposit object every four seconds, so depending on the object would tear
+  // down and rebuild the interval on each tick and the timer would drift
+  // further behind the thing it is polling for.
+  const awaitingPayment = Boolean(deposit) && ['pending', 'requires_action'].includes(deposit.status)
   useEffect(() => {
-    if (!deposit || !['pending', 'requires_action'].includes(deposit.status)) return undefined
+    if (!awaitingPayment) return undefined
     const timer = setInterval(() => {
       setPoll((p) => p + 1)
       load()
     }, 4000)
     return () => clearInterval(timer)
-  }, [deposit?.status])
+  }, [awaitingPayment, load])
 
   const act = async (outcome) => {
     setBusy(true)

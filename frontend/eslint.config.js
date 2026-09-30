@@ -43,9 +43,19 @@ export default [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_[a-z]', caughtErrors: 'none' },
       ],
-      // React 18 + the automatic JSX runtime: `React` does not need importing,
-      // and `no-undef` cannot see JSX-only identifiers.
-      'no-undef': 'off',
+      // `no-undef` is ON, and it earns its place: it is the only gate that
+      // caught a missing `fmtCents` import on the signup page, which a green
+      // `vite build` and a 38-check render smoke both passed - the smoke
+      // because it never rendered that page, the bundler because an undefined
+      // identifier is not a syntax error. It rendered a blank screen the moment
+      // the bonus banner appeared, which on the default configuration is
+      // always.
+      //
+      // It is safe with the automatic JSX runtime because `react/jsx-uses-vars`
+      // (above) marks JSX-referenced identifiers as used, so components are
+      // never reported as undefined. Switching this off to quiet a false
+      // positive would mean giving up the check that finds this class of bug.
+      'no-undef': 'error',
     },
   },
   {

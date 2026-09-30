@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useStore } from '../lib/store.jsx'
 import { Alert, Card } from '../components/ui.jsx'
 import { countryOptions } from '../lib/countries.js'
+import { fmtCents } from '../lib/format.js'
 
 export default function Register() {
   const { t, i18n } = useTranslation()

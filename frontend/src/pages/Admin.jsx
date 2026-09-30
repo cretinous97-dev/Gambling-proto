@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api.js'
 import { fmtCents, fmtDate, fmtMultiplier } from '../lib/format.js'
 import { ActionButton, Alert, Badge, Card, Empty, Loading, Modal, Stat, Tabs } from '../components/ui.jsx'
@@ -9,6 +9,13 @@ import BankingManager from './admin/BankingManager.jsx'
  * Back office. Everything here is a privileged operation and every mutation is
  * written to the server-side audit log with the admin's id, before/after
  * values and a free-text reason.
+ *
+ * On `onError`: every panel takes the parent's `setError`, which is a `useState`
+ * dispatcher and therefore referentially stable for the life of the component.
+ * That is what makes it safe to list in an effect's dependencies - the rule is
+ * satisfied, the fetch still runs once, and the panel can no longer call a
+ * stale closure. Passing an inline arrow here instead would create a new
+ * function every render and turn these effects into fetch loops, so don't.
  */
 export default function Admin() {
   const { toast } = useStore()
@@ -62,7 +69,7 @@ function Dashboard({ onError }) {
         setRevenue(r.series || [])
       } catch (err) { onError(err.message) }
     })()
-  }, [])
+  }, [onError])
 
   if (!data) return <Loading />
 
@@ -154,13 +161,13 @@ function Withdrawals({ onError, toast }) {
   const [rows, setRows] = useState(null)
   const [filter, setFilter] = useState('under_review')
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const res = await api.adminWithdrawals(filter || undefined)
       setRows(res.withdrawals)
     } catch (err) { onError(err.message) }
-  }
-  useEffect(() => { load() }, [filter])
+  }, [filter, onError])
+  useEffect(() => { load() }, [load])
 
   const decide = async (w, approve) => {
     const reason = approve ? window.prompt('Review note (optional)') : window.prompt('Rejection reason (required)')
@@ -256,7 +263,7 @@ function Deposits({ onError }) {
         setRows(res.deposits)
       } catch (err) { onError(err.message) }
     })()
-  }, [filter])
+  }, [filter, onError])
 
   if (!rows) return <Loading />
 
@@ -308,13 +315,16 @@ function Users({ onError, toast }) {
   const [detail, setDetail] = useState(null)
   const [adjust, setAdjust] = useState({ amount: '', reason: '' })
 
-  const load = async (q = '') => {
+  // The query arrives as an argument, not through the closure. Depending on the
+  // `query` state here would re-create this callback on every keystroke, and the
+  // effect below would fire a request per character typed into the search box.
+  const load = useCallback(async (q = '') => {
     try {
       const res = await api.adminUsers(q || undefined)
       setRows(res.users)
     } catch (err) { onError(err.message) }
-  }
-  useEffect(() => { load() }, [])
+  }, [onError])
+  useEffect(() => { load() }, [load])
 
   const open = async (id) => {
     setSelected(id)
@@ -503,10 +513,10 @@ function Bonuses({ onError, toast }) {
     wager_multiplier: '30', uses_left: '100', min_deposit: '10.00',
   })
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try { setCodes((await api.adminBonusCodes()).codes) } catch (err) { onError(err.message) }
-  }
-  useEffect(() => { load() }, [])
+  }, [onError])
+  useEffect(() => { load() }, [load])
 
   const grant = async () => {
     try {
@@ -668,7 +678,7 @@ function Ledger({ onError }) {
   const [rows, setRows] = useState(null)
   useEffect(() => {
     api.adminLedger().then((r) => setRows(r.transactions)).catch((e) => onError(e.message))
-  }, [])
+  }, [onError])
   if (!rows) return <Loading />
 
   return (
@@ -710,7 +720,7 @@ function Audit({ onError }) {
   const [rows, setRows] = useState(null)
   useEffect(() => {
     api.adminAudit().then((r) => setRows(r.entries)).catch((e) => onError(e.message))
-  }, [])
+  }, [onError])
   if (!rows) return <Loading />
 
   return (
@@ -753,7 +763,7 @@ function System({ onError }) {
         setSessions(s.sessions)
       } catch (err) { onError(err.message) }
     })()
-  }, [])
+  }, [onError])
 
   if (!health) return <Loading />
 

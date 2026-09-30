@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, openCrashSocket } from '../lib/api.js'
 import { fmtCents } from '../lib/format.js'
@@ -25,6 +25,30 @@ export default function Crash() {
   const connected = useRef(false)
   const [display, setDisplay] = useState(1)
 
+  const refreshMyBet = useCallback(async () => {
+    if (!isAuthed) return
+    try {
+      setMyBet((await api.crashMe()).your_bet)
+    } catch {
+      /* not fatal */
+    }
+  }, [isAuthed])
+
+  // The feed is a subscription: rebuilding it every time a callback's identity
+  // changes would drop frames mid-round, and a socket that reconnects during a
+  // running round is a socket that misses the crash. So the handlers the feed
+  // calls live in a ref that always points at the current render's closures.
+  //
+  // This is not a nicety. The effect below opens the socket once, on mount,
+  // when the session check has not finished and `isAuthed` is still false -
+  // and `refreshMyBet` captured from that render returns immediately, forever.
+  // The player's own bet then never updated on a crash, on exactly the load
+  // order most players hit.
+  const handlers = useRef({})
+  useEffect(() => {
+    handlers.current = { refreshMyBet, refreshWallet }
+  }, [refreshMyBet, refreshWallet])
+
   // ---- live feed ---------------------------------------------------------
   useEffect(() => {
     const onMessage = (msg) => {
@@ -38,8 +62,8 @@ export default function Crash() {
       setDisplay(msg.multiplier ?? 1)
       if (msg.history) setHistory(msg.history)
       if (msg.phase === 'crashed') {
-        refreshWallet()
-        refreshMyBet()
+        handlers.current.refreshWallet?.()
+        handlers.current.refreshMyBet?.()
       }
     }
     // Wire the live feed. If the transport never connects - serverless rejects
@@ -86,19 +110,9 @@ export default function Crash() {
     return () => clearInterval(timer)
   }, [state?.phase, state?.round_number])
 
-  const refreshMyBet = async () => {
-    if (!isAuthed) return
-    try {
-      const s = await api.crashMe()
-      setMyBet(s.your_bet)
-    } catch {
-      /* not fatal */
-    }
-  }
-
   useEffect(() => {
     if (isAuthed) refreshMyBet()
-  }, [isAuthed, state?.round_number])
+  }, [isAuthed, state?.round_number, refreshMyBet])
 
   const placeBet = async () => {
     setError('')

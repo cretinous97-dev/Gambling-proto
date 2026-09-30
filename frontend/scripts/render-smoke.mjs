@@ -46,6 +46,11 @@ const CONFIG = {
     kyc_required_above: 100_000, min_bet: 10, max_bet: 200_000,
   },
   jurisdiction: { mode: 'allow_all', blocklist: [], restricted: [], open_to_every_country: true },
+  // Present, and switched on, because the signup page renders a banner only
+  // when `first_deposit_pct > 0`. A stub that omitted this would skip the
+  // branch - which is how a missing import inside it survived a 38-check
+  // smoke run and shipped.
+  bonuses: { signup_bonus: 0, first_deposit_pct: 100, first_deposit_cap: 10000, first_deposit_wager_x: 30 },
   i18n: {
     settlement_currency: 'USD',
     default_locale: 'en',
@@ -109,10 +114,16 @@ const TRANSACTIONS = {
   total: 2, limit: 15, offset: 0, settlement_currency: 'USD', amounts_are_minor_units: true,
 }
 
+// Set by boot() before it installs fetch. The admin console redirects a
+// non-admin away from the route, so proving it renders means answering
+// /auth/me as the operator - and the operator shape is different enough
+// (role, no player stats driving the UI) that it is worth its own object.
+let asAdmin = false
+
 function routeFor(url) {
   const path = new URL(url, 'http://localhost').pathname
   if (path === '/api/config') return CONFIG
-  if (path === '/api/auth/me') return ME
+  if (path === '/api/auth/me') return asAdmin ? { ...ME, role: 'admin', username: 'operator' } : ME
   if (path === '/api/wallet/summary') return { balances: ME.balances }
   if (path === '/api/wallet/transactions') return TRANSACTIONS
   if (path === '/api/games/catalog') return { games: [] }
@@ -128,6 +139,72 @@ function routeFor(url) {
   // A bare array, matching the API: /auth/notifications returns a list, not an
   // envelope. Getting this wrong is how the account page white-screens.
   if (path === '/api/auth/notifications') return []
+  // --- the operator console -------------------------------------------------
+  // Plausible shapes, copied from the real responses. `{}` would not do: the
+  // dashboard reads `data.money_24h.ggr` and `data.queues.withdrawals_pending`,
+  // so an empty object throws on a payload the server never sends - which
+  // proves nothing about the app and hides every panel behind the first tab.
+  if (path === '/api/admin/dashboard') {
+    return {
+      players: { total: 128, new_24h: 6, active_24h: 41, verified: 77, self_excluded: 1, banned: 2 },
+      money_24h: { deposits: 450000, withdrawals: 120000, wagered: 980000, returned: 940000, ggr: 40000, net_deposits: 330000 },
+      money_7d: { wagered: 6400000, returned: 6100000, ggr: 300000, margin_pct: 4.7 },
+      queues: { withdrawals_pending: 2, kyc_pending: 1, failed_webhooks: 0 },
+      realtime: { crash_sockets: 3 },
+      provider: { provider: 'sandbox', ok: true, simulation: true, mode: 'simulation', warning: '' },
+      integrity: { books_balanced: true, totals: {} },
+      jackpot: { name: 'Daily jackpot', amount: 1250000, contribution_pct: 1.5 },
+    }
+  }
+  if (path === '/api/admin/revenue') {
+    return { series: [{ day: '2026-09-29', ggr: 40000, wagered: 980000, deposits: 450000, withdrawals: 120000 }] }
+  }
+  if (path === '/api/admin/health') {
+    return {
+      environment: 'test',
+      payment_provider: { provider: 'sandbox', ok: true, simulation: true, mode: 'simulation', warning: '' },
+      ledger: { balanced: true, accounts: {} },
+      pending_withdrawals: 0, unprocessed_webhooks: 0, crash_clients: 0,
+    }
+  }
+  // Crash, both frames: the socket is closed in jsdom, so the REST poll drives
+  // it - which is the fallback path on any deployment without websocket support.
+  if (path === '/api/crash/state' || path === '/api/crash/state/me') {
+    return {
+      phase: 'running', round_number: 7, server_seed_hash: 'a'.repeat(64),
+      started_at: '2026-09-29T11:00:00Z', elapsed: 4.2, multiplier: 1.42,
+      player_count: 5, total_stake: 25000, players: [], your_bet: null, crash_point: 3.33,
+    }
+  }
+  // Note `aml-queue` returns `queue`, not `cases`/`flagged`.
+  if (path === '/api/admin/aml-queue') return { queue: [] }
+  if (path === '/api/admin/withdrawals') return { withdrawals: [] }
+  if (path === '/api/admin/deposits') return { deposits: [] }
+  if (path === '/api/admin/users') return { users: [] }
+  if (path === '/api/admin/audit') return { entries: [] }
+  if (path === '/api/admin/ledger') return { transactions: [] }
+  if (path === '/api/admin/webhooks') return { webhooks: [] }
+  if (path === '/api/admin/sessions') return { sessions: [] }
+  if (path === '/api/admin/big-wins') return { wins: [] }
+  if (path === '/api/admin/bonuses/codes') return { codes: [] }
+  // The banking manager, as the admin API returns it - including the fields an
+  // operator added and has not yet given a key to.
+  if (path === '/api/admin/banking-methods') {
+    return {
+      total: 1,
+      providers: ['', 'adyen', 'stripe', 'cryptopay', 'bank_transfer', 'sandbox'],
+      method_kinds: ['bank_transfer', 'card', 'wallet', 'crypto'],
+      methods: [{
+        id: 'bm1', name: 'mBoB (Bank of Bhutan)', country_code: 'BT', currency: 'BTN',
+        account_id: '201835782', api_endpoint: '', credential_env: 'MBOB_API_KEY',
+        credential_present: false, provider: 'bank_transfer', effective_provider: 'bank_transfer',
+        method: 'bank_transfer', deposits_enabled: true, withdrawals_enabled: false,
+        active: false, priority: 10, min_amount_minor: 5000, max_amount_minor: 2000000,
+        fee_bps: 25, notes: 'Seeded inactive: MBOB_API_KEY is not set in this deployment.',
+        instructions: {}, created_at: '2026-09-29T23:32:15Z', updated_at: '2026-09-29T23:32:15Z',
+      }],
+    }
+  }
   if (path.startsWith('/api/')) return {}
   return null
 }
@@ -163,9 +240,10 @@ if (!jsFile) {
 const bundle = readFileSync(join(assetDir, jsFile), 'utf8')
 
 /** Boot the real bundle at a URL and let React settle. */
-async function boot(url, { locale } = {}) {
+async function boot(url, { locale, anonymous = false, admin = false } = {}) {
   const dom = new JSDOM(html, { url, runScripts: 'outside-only', pretendToBeVisual: true })
   const { window } = dom
+  asAdmin = admin
   installFetch(window)
 
   // React reports a render crash through console.error, complete with the
@@ -183,8 +261,10 @@ async function boot(url, { locale } = {}) {
   // A signed-in session, because the pages worth smoke-testing sit behind auth.
   // The token is never checked by the stub - what matters is that the store
   // takes the authenticated path instead of bouncing to /login.
-  window.localStorage.setItem('nc.access_token', 'smoke-test-token')
-  window.localStorage.setItem('nc.refresh_token', 'smoke-test-refresh')
+  if (!anonymous) {
+    window.localStorage.setItem('nc.access_token', 'smoke-test-token')
+    window.localStorage.setItem('nc.refresh_token', 'smoke-test-refresh')
+  }
   if (locale) window.localStorage.setItem('casino.locale', locale)
 
   // Browser APIs the bundle expects.
@@ -326,6 +406,110 @@ try {
   check('the player is told what happens next', liveText.includes('Continue to payment'))
 } catch (err) {
   check('the hosted payment page renders', false, String(err).slice(0, 200))
+}
+
+// --- the page every player must get through --------------------------------
+// Signup was the one route the smoke never rendered, and it was the one route
+// that crashed: the bonus banner referenced `fmtCents` without importing it, so
+// the page threw on the default configuration and every new player got a blank
+// screen. A build passes that (an undefined identifier is not a syntax error),
+// and so did the rest of this file, because none of it visited /register.
+//
+// Rendered WITHOUT a session token, because that is how a new player arrives.
+console.log('\n  — signed-out entry pages —')
+for (const page of [
+  { url: 'http://localhost/en/register', expect: ['Create your account', 'At least 8 characters'] },
+  { url: 'http://localhost/en/login', expect: ['Sign in'] },
+]) {
+  try {
+    const w = await boot(page.url, { anonymous: true })
+    if (process.env.DUMP) console.log(w.__smokeErrors.join('\n\n'))
+    const text = w.document.getElementById('root')?.textContent || ''
+    for (const needle of page.expect) {
+      check(`${page.url} shows "${needle}"`, text.includes(needle))
+    }
+    check(`${page.url} is not blank`, text.replace(/\s+/g, '').length > 100)
+    check(
+      `${page.url} renders without throwing`,
+      (w.__smokeErrors || []).length === 0,
+      String((w.__smokeErrors || [])[0] || '').slice(0, 200),
+    )
+    check(`${page.url} leaks no raw keys`, !/[a-z]+\.[a-z_]+_[a-z]+\s|\bauth\.|\bcheckout\./.test(text))
+  } catch (err) {
+    check(`${page.url} renders`, false, String(err).slice(0, 200))
+  }
+}
+
+// --- the landing page and the operator console ------------------------------
+// The console is every privileged action in the product, and the landing page
+// is the first thing anyone sees; neither was ever rendered here.
+console.log('\n  — landing page and operator console —')
+try {
+  const home = await boot('http://localhost/en', { anonymous: true })
+  const text = home.document.getElementById('root')?.textContent || ''
+  check('the landing page is not blank', text.replace(/\s+/g, '').length > 200)
+  check('the landing page renders without throwing', (home.__smokeErrors || []).length === 0,
+    String((home.__smokeErrors || [])[0] || '').slice(0, 200))
+  check('the landing page offers a way in', /Sign in|Create|Log in|Register/i.test(text))
+} catch (err) {
+  check('the landing page renders', false, String(err).slice(0, 200))
+}
+
+try {
+  const adm = await boot('http://localhost/en/admin', { admin: true })
+  if (process.env.DUMP) console.log(adm.__smokeErrors.join('\n\n'))
+  const root = adm.document.getElementById('root')
+  const text = root?.textContent || ''
+  check('the operator console renders without throwing', (adm.__smokeErrors || []).length === 0,
+    String((adm.__smokeErrors || [])[0] || '').slice(0, 200))
+  check('the console shows its tabs', text.includes('Withdrawals') && text.includes('Ledger'))
+  check('the banking manager is reachable', text.includes('Banking methods'))
+  // Click through every tab: a panel that throws only when opened is exactly
+  // what an unvisited route hides.
+  const tabs = [...root.querySelectorAll('button, [role="tab"]')]
+    .filter((el) => ['Banking methods', 'Withdrawals', 'Ledger', 'Audit log', 'System', 'Risk & AML']
+      .includes(el.textContent.trim()))
+  check('the console exposes the money tabs', tabs.length >= 5, `${tabs.length} found`)
+  for (const tab of tabs) {
+    tab.click()
+    await new Promise((resolveTimer) => setTimeout(resolveTimer, 300))
+    const after = root.textContent || ''
+    check(`the "${tab.textContent.trim()}" tab opens`, after.replace(/\s+/g, '').length > 100)
+  }
+  const finalErrors = (adm.__smokeErrors || []).filter((e) => !/not wrapped in act/.test(e))
+  check('no tab threw while opened', finalErrors.length === 0, String(finalErrors[0] || '').slice(0, 200))
+} catch (err) {
+  check('the operator console renders', false, String(err).slice(0, 200))
+}
+
+// --- crash ------------------------------------------------------------------
+// The socket is stubbed shut, so this is the poll fallback running - the same
+// path a player gets behind a proxy that strips websocket upgrades. The state
+// arrow was reworked to survive a socket that opens before sign-in resolves,
+// and this is what says it still renders either way.
+console.log('\n  — crash (poll fallback, no websocket) —')
+try {
+  const cw = await boot('http://localhost/en/crash')
+  if (process.env.DUMP) console.log(cw.__smokeErrors.join('\n\n'))
+  check('the crash page renders without throwing', (cw.__smokeErrors || []).length === 0,
+    String((cw.__smokeErrors || [])[0] || '').slice(0, 200))
+  // The socket is dead in jsdom, so the REST poll is the only thing that can
+  // put a number on the page at all. Waiting for a tick is what tests the
+  // fallback rather than the initial paint - before it fires there is nothing
+  // to assert on but a spinner.
+  await new Promise((resolveTimer) => setTimeout(resolveTimer, 3500))
+  const text = cw.document.getElementById('root')?.textContent || ''
+  check('the crash page is not blank', text.replace(/\s+/g, '').length > 150)
+  // The frame said 1.42x, and the display is expected to have moved past it:
+  // between frames the client interpolates for smooth animation. Asserting an
+  // exact 1.42 would fail on a working build, so the contract is "a live
+  // multiplier near the frame the server sent, in the right format".
+  const shown = (text.match(/(\d+\.\d{2})x/) || [])[1]
+  check('the poll fallback put a live multiplier on screen',
+    Boolean(shown) && Number(shown) >= 1.42 && Number(shown) < 2,
+    `server sent 1.42x, screen shows ${shown ? `${shown}x` : 'nothing'}`)
+} catch (err) {
+  check('the crash page renders', false, String(err).slice(0, 200))
 }
 
 console.log(`\nfinal: ${passed} passed, ${failures.length} failed`)
