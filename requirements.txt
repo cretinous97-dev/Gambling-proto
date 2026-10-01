@@ -13,6 +13,17 @@ PyJWT==2.10.1
 bcrypt==4.2.1
 email-validator==2.2.0
 
+# HTTP client used by the payment adapters (Adyen, Stripe, CryptoPay, bank
+# transfer) to call out to the processor's API. NOT test-only: it used to be
+# missing from this file on the theory that it was only needed by
+# tests/httpx.TestClient, which crashed every single deployment with
+# ModuleNotFoundError: No module named 'httpx' - app/payments/__init__.py
+# imports the bank-transfer adapter unconditionally, regardless of which
+# PAYMENT_PROVIDER is configured, so the import failure hit every cold start
+# before a single route could run. See test_deploy_config.py for the guard
+# that now catches this class of mistake.
+httpx==0.28.1
+
 # Postgres driver. The default deployment uses SQLite in /tmp, which is wiped on
 # restart - fine for a demo, useless for anything else. Point DATABASE_URL at a
 # hosted Postgres (Neon, Supabase, RDS) and balances survive.

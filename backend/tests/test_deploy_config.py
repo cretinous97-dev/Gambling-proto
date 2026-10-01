@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 import os
 
@@ -28,9 +29,19 @@ ENTRY = ROOT / next(iter(VERCEL_FUNCTIONS))
 
 #: Fine to differ between the two lists:
 #:   uvicorn - the serverless runtime supplies its own ASGI server
-#:   httpx / pytest / pglast - test-only dependencies
+#:   pytest / pglast - test-only dependencies
 #:   psycopg - deploy-only (Postgres for a persistent deployment)
-DEV_ONLY = {"uvicorn", "httpx", "pytest", "pglast"}
+#:
+#: httpx is deliberately NOT here. It looks test-only - Starlette's
+#: TestClient is built on it - but app/payments/bank_transfer.py (imported
+#: unconditionally by app/payments/__init__.py, imported unconditionally by
+#: app/main.py) also imports it to call out to a payment rail's API. It was
+#: in this set once; the root requirements.txt Vercel installs then had no
+#: httpx, and every deployment 500'd at import with
+#: "ModuleNotFoundError: No module named 'httpx'" before a single request was
+#: served. Keeping it out of DEV_ONLY is what makes test_requirements_files_agree
+#: below catch that again if it ever regresses.
+DEV_ONLY = {"uvicorn", "pytest", "pglast"}
 DEPLOY_ONLY = {"psycopg"}
 
 
@@ -70,6 +81,85 @@ def test_requirements_files_agree():
         )
 
 
+# ---------------------------------------------------------------------------
+# "every deployment 500s at import" - the general case
+# ---------------------------------------------------------------------------
+# httpx was one specific instance of a broader mistake: a package imported
+# somewhere under backend/app/ (even inside a function, behind a PAYMENT_PROVIDER
+# check nobody exercises in CI) but missing from the root requirements.txt that
+# Vercel actually installs. The failure mode is always the same -
+# ModuleNotFoundError at import, before any application code runs, 500 on every
+# request - and it is always invisible locally because a developer's venv has
+# backend/requirements.txt (the superset) installed. This walks the real AST of
+# every file the application ships, rather than trusting anyone to update a
+# by-hand list the next time it happens with a different package.
+APP_DIR = ROOT / "backend" / "app"
+
+#: import name -> the name it is pinned under in requirements.txt.
+IMPORT_TO_PACKAGE = {
+    "jwt": "pyjwt",
+    "pydantic_settings": "pydantic-settings",
+}
+
+#: Transitive dependencies of something already pinned (e.g. starlette ships
+#: with fastapi). Not expected to appear as their own line.
+TRANSITIVE_OK = {"starlette", "anyio", "typing_extensions"}
+
+
+def _thirdparty_imports(py_file: Path) -> set[str]:
+    """Every top-level third-party package named anywhere in this file.
+
+    Walks the whole AST, not just module-level statements, because a lazy
+    `import httpx` inside a function is exactly as fatal the first time
+    PAYMENT_PROVIDER selects that code path - deferring an import delays the
+    crash, it does not prevent it on a deployment that installs the wrong set.
+    """
+    import ast
+
+    tree = ast.parse(py_file.read_text(), filename=str(py_file))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                continue  # relative import: part of this application
+            if node.module:
+                names.add(node.module.split(".")[0])
+    return names
+
+
+def test_every_import_under_app_is_installable_from_the_root_requirements():
+    """Reproduces, generally, the bug that shipped `httpx` only to development.
+
+    `python -m pytest` runs with backend/requirements.txt installed - the
+    superset - so a missing-from-deploy dependency is invisible to every other
+    test and to any developer running the app locally. This is the one check
+    that looks at what Vercel actually installs.
+    """
+    stdlib = set(sys.stdlib_module_names)
+    root_packages = {name.lower() for name in parse_requirements(ROOT_REQS)}
+
+    missing: dict[str, list[str]] = {}
+    for py_file in APP_DIR.rglob("*.py"):
+        for name in _thirdparty_imports(py_file):
+            if name in stdlib or name == "app" or name in TRANSITIVE_OK:
+                continue
+            package = IMPORT_TO_PACKAGE.get(name, name).lower()
+            if package not in root_packages:
+                missing.setdefault(name, []).append(
+                    str(py_file.relative_to(ROOT))
+                )
+
+    assert not missing, (
+        "these imports under backend/app/ are not installable from the root "
+        "requirements.txt Vercel deploys with, so importing them would "
+        "500 every request with ModuleNotFoundError: "
+        f"{missing}"
+    )
+
+
 def test_serverless_runtime_dependencies_are_declared():
     """The serverless path imports psycopg only in production, but it must be
     installable there."""
@@ -94,6 +184,31 @@ def test_vercel_json_is_valid_and_complete():
     assert "backend" in " ".join(
         entry["includeFiles"] if isinstance(entry["includeFiles"], list) else [entry["includeFiles"]]
     ), "the function needs the application code"
+
+
+def test_payment_adapters_are_imported_lazily_from_the_registry():
+    """`bank_transfer` used to be the one adapter imported eagerly.
+
+    `app/payments/__init__.py` is imported unconditionally by `app/main.py`,
+    which is imported unconditionally by the entry point - so anything that
+    module imports at the top level runs on every single cold start,
+    regardless of PAYMENT_PROVIDER. stripe/adyen/cryptopay were already
+    deferred inside `_build_provider()`; `bank_transfer` was not, so its
+    `import httpx` ran unconditionally too. httpx being missing from the
+    deploy-time requirements is what turned that into an outage - but the
+    eager import is what made the blast radius "every deployment" instead of
+    "deployments that configure bank_transfer".
+    """
+    source = (ROOT / "backend" / "app" / "payments" / "__init__.py").read_text()
+    module_level = source.split("def _build_provider")[0]
+    assert "from .bank_transfer import" not in module_level, (
+        "bank_transfer is imported at module level again - it, and everything "
+        "it imports, now runs on every cold start regardless of which "
+        "PAYMENT_PROVIDER is configured"
+    )
+    assert "from .stripe_provider import" not in module_level
+    assert "from .adyen import" not in module_level
+    assert "from .cryptopay import" not in module_level
 
 
 def test_entry_point_exists_and_bootstraps_the_application():

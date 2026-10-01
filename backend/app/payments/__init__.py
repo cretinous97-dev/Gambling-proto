@@ -4,10 +4,19 @@ from __future__ import annotations
 from functools import lru_cache
 
 from ..config import settings
-from .bank_transfer import BankTransferProvider, bank_transfer_provider
 from .base import DepositIntent, PaymentError, PaymentProvider, PayoutResult
 from .sandbox import SandboxProvider, sandbox_provider
 
+# BankTransferProvider, like AdyenProvider and StripeProvider below, is
+# deliberately NOT imported here. Each adapter's own module pulls in whatever
+# that rail's API needs (httpx, for all four), and this registry is imported
+# unconditionally by app/main.py on every cold start - so importing an adapter
+# at module level means paying for, and risking the failure of, every rail's
+# dependencies on every request, regardless of which PAYMENT_PROVIDER is
+# configured. bank_transfer used to be the one exception to this; it is what
+# made a missing `httpx` in the deploy requirements take down every
+# deployment instead of only ones that configured it. See
+# test_payment_adapters_are_imported_lazily_from_the_registry.
 __all__ = [
     "AdyenProvider",
     "BankTransferProvider",
@@ -53,6 +62,8 @@ def _build_provider(name: str) -> PaymentProvider:
 
         return AdyenProvider()
     if name == "bank_transfer":
+        from .bank_transfer import bank_transfer_provider
+
         return bank_transfer_provider
     if name == "cryptopay":
         from .cryptopay import CryptoPayProvider
