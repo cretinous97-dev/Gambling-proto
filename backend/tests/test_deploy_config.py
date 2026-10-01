@@ -555,3 +555,76 @@ def test_a_local_development_server_is_not_flagged_as_a_demo(monkeypatch):
     settings = _settings(monkeypatch, serverless=False, database_url="sqlite:///./data/casino.db")
     assert settings.serverless is False
     assert settings.demo_mode is False
+
+
+# ---------------------------------------------------------------------------
+# DATABASE_URL shapes that crashed every request with FUNCTION_INVOCATION_FAILED
+# ---------------------------------------------------------------------------
+# `create_engine()` imports the DBAPI driver immediately, not on first use, so
+# the wrong scheme does not fail a query - it fails the module import. On
+# Vercel that import runs on every cold start, so the whole site 500s on
+# every request until the environment variable is fixed, with no application
+# log to point at because no application code ever ran.
+#
+# Two shapes are wrong in a way an operator cannot be expected to know in
+# advance, because they are exactly what a provider's dashboard hands you:
+#
+#   postgres://...    - Heroku's scheme. SQLAlchemy 1.4+ dropped the
+#                        `postgres` dialect alias: NoSuchModuleError at import.
+#   postgresql://...  - Neon/Supabase/`psql`'s scheme. Parses fine, but with
+#                        no driver named SQLAlchemy defaults to psycopg2,
+#                        which this project does not install (it ships
+#                        psycopg 3): ModuleNotFoundError at import.
+def test_a_bare_postgres_url_is_upgraded_to_the_installed_driver(monkeypatch):
+    settings = _settings(
+        monkeypatch, serverless=True, database_url="postgres://u:p@db.example.com/casino",
+    )
+    assert settings.database_url == "postgresql+psycopg://u:p@db.example.com/casino"
+
+
+def test_a_driverless_postgresql_url_is_upgraded_to_the_installed_driver(monkeypatch):
+    settings = _settings(
+        monkeypatch,
+        serverless=True,
+        database_url="postgresql://u:p@ep-xxx.neon.tech/neondb?sslmode=require",
+    )
+    assert settings.database_url == (
+        "postgresql+psycopg://u:p@ep-xxx.neon.tech/neondb?sslmode=require"
+    )
+
+
+def test_a_url_that_already_names_a_driver_is_left_alone(monkeypatch):
+    for url in (
+        "postgresql+psycopg://u:p@db.example.com/casino",
+        "postgresql+psycopg2://u:p@db.example.com/casino",
+        "postgresql+asyncpg://u:p@db.example.com/casino",
+    ):
+        settings = _settings(monkeypatch, serverless=True, database_url=url)
+        assert settings.database_url == url
+
+
+def test_sqlite_urls_are_not_touched(monkeypatch):
+    settings = _settings(
+        monkeypatch, serverless=False, database_url="sqlite:///./data/casino.db",
+    )
+    assert settings.database_url == "sqlite:///./data/casino.db"
+
+
+def test_the_engine_actually_imports_for_both_wrong_shapes():
+    """Prove the fix at the layer that actually broke: create_engine().
+
+    A unit test on the string alone would not have caught the original bug -
+    `postgresql://...` parses as a perfectly valid URL. The failure only
+    exists once SQLAlchemy tries to import the driver, which is what crashed
+    in production.
+    """
+    from sqlalchemy import create_engine
+
+    from app.config import _normalize_database_url
+
+    for raw in (
+        "postgres://u:p@db.example.com/casino",
+        "postgresql://u:p@db.example.com/casino",
+    ):
+        engine = create_engine(_normalize_database_url(raw))
+        assert engine.dialect.driver == "psycopg"

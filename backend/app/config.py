@@ -15,6 +15,42 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _normalize_database_url(url: str) -> str:
+    """Fix the two Postgres URL shapes that crash the app at import time.
+
+    `create_engine()` resolves and imports the DBAPI driver *immediately*, not
+    on first connection - so the wrong scheme does not fail a query, it fails
+    the module import. On a serverless platform that import runs on every cold
+    start, so the whole site returns FUNCTION_INVOCATION_FAILED for every
+    request until the environment variable is fixed.
+
+    Two shapes are wrong in a way an operator cannot be expected to know in
+    advance, because they come straight from the provider:
+
+    * ``postgres://...`` - the scheme Heroku, and several of its imitators,
+      hand out. SQLAlchemy 1.4+ dropped the ``postgres`` dialect alias, so this
+      raises ``NoSuchModuleError`` before a single line of application code
+      runs.
+    * ``postgresql://...`` - what Neon, Supabase and `psql` itself give you.
+      It parses fine, but with no driver specified SQLAlchemy defaults to
+      psycopg2, which this project does not install (it ships psycopg 3 - see
+      requirements.txt). That raises ``ModuleNotFoundError: No module named
+      'psycopg2'``, again at import time.
+
+    Both are silently rewritten to ``postgresql+psycopg://`` (psycopg 3, which
+    is installed) so that pasting the connection string a provider's dashboard
+    actually shows you works, instead of depending on everyone editing it by
+    hand first. A URL that already names a driver (``+psycopg2``, ``+asyncpg``,
+    ...) is left exactly as given.
+    """
+    scheme = url.split("://", 1)[0] if "://" in url else url
+    if scheme == "postgres":
+        return "postgresql+psycopg://" + url.split("://", 1)[1]
+    if scheme == "postgresql":
+        return "postgresql+psycopg://" + url.split("://", 1)[1]
+    return url
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # Relative paths resolve against the working directory, which for this
@@ -194,6 +230,8 @@ class Settings(BaseSettings):
                 self.database_url = f"sqlite:///{Path(self.sqlite_fallback_dir) / 'casino.db'}"
             else:
                 self.database_url = f"sqlite:///{self.base_dir / 'data' / 'casino.db'}"
+        else:
+            self.database_url = _normalize_database_url(self.database_url)
 
         # Demo mode drives a banner that tells the player their balance is not
         # real money and may reset, and puts a "demo" badge next to it. That
